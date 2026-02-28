@@ -1,15 +1,17 @@
 # macOS
 .DS_Store
 
-# Python cache
+# Virtual Environments & Cache
+.venv/
+venv/
 __pycache__/
+*.py[cod]
 *.pyc
 
-# Virtual environments
-venv/
+# Streamlit Secrets
+.streamlit/secrets.toml
 
-# ML models / weights
+# Heavy ML Models & Weights (CRITICAL)
 *.safetensors
 *.bin
-bert_brain/
-
+3_agents/classification_agent/bert_brain/

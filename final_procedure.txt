@@ -1,0 +1,766 @@
+============================================================
+SECTION 1 — PROJECT OVERVIEW
+============================================================
+
+Project Name: Civic Sentinel — Intelligent Citizen Grievance Prioritization System
+Full Academic Title: Explainable Multi-Agent Decision Intelligence Framework for Context-Aware Citizen Grievance Prioritization (TARP)
+
+High-Level Objective:
+Civic Sentinel is an AI-powered civic grievance redressal system that receives citizen complaints (text, voice, image), processes them through a multi-agent intelligence pipeline, scores each complaint using a novel Civil Criticality Index (CCI), and presents prioritized results to government administrators via a real-time command center dashboard with geospatial routing capabilities.
+
+Problem It Solves:
+Traditional grievance redressal systems process complaints in FIFO order without regard for severity, urgency, or context. A minor noise complaint is treated identically to a life-threatening gas leak. Civic Sentinel solves this by applying AI-based triage: classifying, sentiment-analyzing, urgency-detecting, and priority-scoring every complaint before dispatching emergency resources via calculated optimal routes.
+
+Target Users:
+1. Citizens — Submit grievances through the Citizen Portal (text, voice, image).
+2. Government Administrators — Monitor, triage, and resolve complaints through the Admin Command Center.
+3. Emergency Response Units — Receive dispatches with optimal routing from nearest station.
+
+Domain Category: AI/ML System + Civic Technology + Geospatial Intelligence Platform
+
+System Type: Monolithic Multi-Agent Pipeline Architecture. The system is a single-deployment application composed of five specialized AI agents orchestrated by a central pipeline, with two Streamlit-based frontend interfaces and a cloud-hosted MongoDB backend.
+
+Deployment Intention: Local development with cloud database (MongoDB Atlas) and cloud API integration (Mapbox Directions API, Google Translate API, Google Speech Recognition API). Production-ready for local or cloud deployment.
+
+
+============================================================
+SECTION 2 — COMPLETE FOLDER & FILE HIERARCHY
+============================================================
+
+Citizen-Grievance-Prioritization/
+├── .git/
+├── .gitignore
+├── .streamlit/
+│   └── secrets.toml
+├── .venv/
+├── 0_project_overview/
+│   └── project_summary.md
+├── 1_datasets/
+│   ├── raw_data/                     (empty — data sourced externally)
+│   └── processed_data/              (empty — data stored in MongoDB)
+├── 2_data_preprocessing/            (empty — preprocessing integrated into pipeline)
+├── 3_agents/
+│   ├── classification_agent/
+│   │   ├── bert_brain/
+│   │   │   ├── config.json
+│   │   │   ├── model.safetensors
+│   │   │   ├── tokenizer.json
+│   │   │   └── tokenizer_config.json
+│   │   └── classifier.py
+│   ├── sentiment_agent/
+│   │   └── sentiment.py
+│   ├── urgency_agent/
+│   │   ├── urgency.py               (legacy version)
+│   │   └── urgency_detect.py        (active version with negation handling)
+│   ├── decision_agent/
+│   │   └── decision.py
+│   ├── translation_agent/
+│   │   └── translator.py
+│   └── explanation_agent/           (empty — reserved for future XAI module)
+├── 4_pipeline/
+│   ├── grievance_pipeline.py        (active orchestrator)
+│   └── grievance_pipeline_OLD.py    (legacy version without translation)
+├── 5_analytics_and_visualization/   (empty — analytics embedded in dashboard)
+├── 6_evaluation/                    (empty — reserved for formal benchmarks)
+├── 7_mvp_application/
+│   ├── app.py                       (standalone MVP — no database)
+│   └── app_OLD.py                   (legacy standalone MVP)
+├── 8_results/
+│   ├── figures/                     (empty — reserved for output charts)
+│   └── tables/                      (empty — reserved for output tables)
+├── 9_documentation/
+│   ├── presentation/               (empty — reserved for slides)
+│   └── tarp_report/                (empty — reserved for academic report)
+├── 10_tests/                        (empty — reserved for formal test suite)
+├── utils/
+│   ├── db_handler.py
+│   ├── location_manager.py
+│   ├── route_engine.py
+│   └── report_generator.py
+├── citizen_portal.py               (PRIMARY: Citizen-facing Streamlit app)
+├── admin_dashboard.py              (PRIMARY: Admin Command Center Streamlit app)
+├── requirements.txt
+├── README.md
+├── progress.txt
+├── reset_db_test.py
+└── test_clip.py
+
+
+============================================================
+SECTION 3 — DETAILED FILE-BY-FILE DOCUMENTATION
+============================================================
+
+────────────────────────────────────────
+FILE 3.1: .gitignore
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/.gitignore
+Purpose: Specifies files and directories excluded from Git version control.
+Why This File Exists: Prevents committing OS artifacts (.DS_Store), Python cache (__pycache__), virtual environments (venv/), and large ML model files (*.safetensors, *.bin, bert_brain/) to the repository.
+Responsibilities: Git exclusion ruleset.
+Internal Components: Glob patterns for macOS files, Python cache, virtual envs, ML weights.
+Input Sources: Git CLI.
+Output Destinations: Git index.
+Dependencies: None.
+Runtime Behavior: Passive — read by Git during staging operations.
+Interaction with Other Files: Prevents bert_brain/ model directory from being committed.
+Failure Handling: None — informational file.
+
+────────────────────────────────────────
+FILE 3.2: .streamlit/secrets.toml
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/.streamlit/secrets.toml
+Purpose: Stores sensitive API credentials for Streamlit applications.
+Why This File Exists: Streamlit's built-in secrets management reads this file to provide API tokens securely via st.secrets at runtime.
+Responsibilities: Stores the Mapbox API token used by route_engine.py for driving route calculations.
+Internal Components: TOML key-value pairs under [general] section. Contains mapbox_token.
+Input Sources: Manual configuration by developer.
+Output Destinations: Consumed by Streamlit via st.secrets["general"]["mapbox_token"].
+Dependencies: Streamlit framework.
+Runtime Behavior: Loaded once at application startup. Accessible as a dictionary throughout the Streamlit session.
+Interaction with Other Files: route_engine.py reads mapbox_token from this file.
+Failure Handling: If missing, route_engine.py displays an error via st.error and returns None for route geometry.
+
+────────────────────────────────────────
+FILE 3.3: 3_agents/classification_agent/classifier.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/classification_agent/classifier.py
+Purpose: AI agent that classifies citizen grievances into predefined municipal categories using a fine-tuned DistilBERT model.
+Why This File Exists: Text classification is the foundational step in the pipeline — every downstream decision depends on knowing the grievance category.
+Responsibilities: (1) Load fine-tuned DistilBERT model and tokenizer from local bert_brain/ directory. (2) Tokenize input text. (3) Perform forward-pass inference. (4) Convert logits to softmax probabilities. (5) Return predicted category label and confidence score.
+Internal Components:
+  - ClassificationAgent class:
+    - __init__(): Loads DistilBertTokenizerFast and DistilBertForSequenceClassification from bert_brain/ directory. Sets model to eval() mode.
+    - predict(text): Tokenizes input (max_length=128), performs torch.no_grad() inference, applies softmax, returns dict with 'category' and 'confidence'.
+Input Sources: English text string from grievance_pipeline.py (post-translation).
+Output Destinations: Returns dict {"category": str, "confidence": float} to grievance_pipeline.py.
+Dependencies: torch, transformers (DistilBertTokenizerFast, DistilBertForSequenceClassification), os.
+Runtime Behavior: Model loaded once during __init__. Each predict() call performs CPU inference in ~50-200ms. Model weights are ~268MB (model.safetensors).
+Interaction with Other Files: Called by grievance_pipeline.py. Reads model files from bert_brain/ subdirectory.
+Failure Handling: Returns {"category": "System Error", "confidence": 0.0} if model fails to load. Returns {"category": "Error", "confidence": 0.0} if prediction fails.
+
+────────────────────────────────────────
+FILE 3.4: 3_agents/classification_agent/bert_brain/
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/classification_agent/bert_brain/
+Purpose: Contains the fine-tuned DistilBERT model weights, tokenizer, and configuration.
+Why This File Exists: The classification agent requires a pre-trained model fine-tuned on civic grievance categories. These files are the serialized model artifacts.
+Responsibilities: Provide model weights (model.safetensors, 268MB), tokenizer vocabulary (tokenizer.json, 711KB), model architecture config (config.json), and tokenizer settings (tokenizer_config.json).
+Internal Components:
+  - config.json: Model architecture definition including id2label mapping for 11 grievance categories (Public Safety & Emergency, Fire & Disaster, Electrical & Power Infrastructure, Medical & Health, Water Supply & Drainage, Roads & Transportation Infrastructure, Sanitation & Public Health, Traffic & Civic Discipline, Noise & Environmental Issues, Animal-Related Issues, Urban Facilities & Amenities).
+  - model.safetensors: Serialized model weights in SafeTensors format.
+  - tokenizer.json: WordPiece tokenizer vocabulary.
+  - tokenizer_config.json: Tokenizer configuration parameters.
+Input Sources: Generated during model training phase.
+Output Destinations: Loaded by classifier.py at application startup.
+Dependencies: None — static files.
+Runtime Behavior: Read-only. Loaded into memory once during ClassificationAgent initialization.
+
+────────────────────────────────────────
+FILE 3.5: 3_agents/sentiment_agent/sentiment.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/sentiment_agent/sentiment.py
+Purpose: AI agent that performs sentiment analysis on grievance text using NLTK VADER lexicon.
+Why This File Exists: Sentiment polarity (negative vs positive) directly influences the urgency of a grievance. A highly negative complaint about a fire is more critical than a neutral report.
+Responsibilities: (1) Initialize VADER SentimentIntensityAnalyzer. (2) Compute compound sentiment score from -1.0 to +1.0. (3) Classify polarity as Positive, Negative, or Neutral.
+Internal Components:
+  - SentimentAgent class:
+    - __init__(): Downloads vader_lexicon if not present, initializes SentimentIntensityAnalyzer.
+    - analyze(text): Returns dict with 'polarity' (str), 'score' (float compound), 'details' (full VADER scores).
+Input Sources: English text from grievance_pipeline.py.
+Output Destinations: Returns dict {"polarity": str, "score": float, "details": dict} to pipeline.
+Dependencies: nltk (SentimentIntensityAnalyzer, vader_lexicon).
+Runtime Behavior: Lexicon-based analysis. Extremely fast (<1ms per call). No GPU required.
+Interaction with Other Files: Called by grievance_pipeline.py. Score feeds into decision.py for CCI calculation.
+Failure Handling: VADER download attempted automatically on first run if lexicon is missing.
+
+────────────────────────────────────────
+FILE 3.6: 3_agents/urgency_agent/urgency_detect.py (ACTIVE)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/urgency_agent/urgency_detect.py
+Purpose: AI agent that detects urgency in grievance text using keyword matching with intelligent negation handling.
+Why This File Exists: Urgency is a binary signal (urgent/not urgent) that provides a significant boost to the CCI score. Simple keyword matching is fast and interpretable.
+Responsibilities: (1) Maintain list of 13 urgent keywords (fire, explosion, gas leak, etc.). (2) Maintain list of 9 negation patterns (no fire, false alarm, bbq, etc.). (3) First check negation patterns via regex. (4) If no negation, check for urgent keywords. (5) Return urgency boolean with reasoning.
+Internal Components:
+  - UrgencyAgent class:
+    - __init__(): Initializes urgent_keywords list and negation_patterns regex list.
+    - analyze_urgency(text): Returns dict with 'is_urgent' (bool), optional 'keywords' (list), 'reason' (str).
+Input Sources: English text from grievance_pipeline.py.
+Output Destinations: Returns dict to pipeline. is_urgent boolean feeds into decision.py.
+Dependencies: re (regex).
+Runtime Behavior: Regex-based, sub-millisecond execution. Negation check runs before keyword check to prevent false positives.
+Interaction with Other Files: Called by grievance_pipeline.py.
+Failure Handling: Returns {"is_urgent": False} by default if no keywords found.
+
+────────────────────────────────────────
+FILE 3.7: 3_agents/urgency_agent/urgency.py (LEGACY)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/urgency_agent/urgency.py
+Purpose: Legacy urgency detector without negation handling. Superseded by urgency_detect.py.
+Why This File Exists: Historical artifact from early development. Retained for reference.
+Responsibilities: Simple keyword-only urgency check without negation logic.
+Internal Components: UrgencyAgent class with check_urgency(text) method.
+Runtime Behavior: Not invoked by the active pipeline.
+
+────────────────────────────────────────
+FILE 3.8: 3_agents/decision_agent/decision.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/decision_agent/decision.py
+Purpose: Decision-making agent that computes the Civil Criticality Index (CCI) — the novel composite metric of the system — by synthesizing category, sentiment, and urgency signals.
+Why This File Exists: CCI is the central innovation of the project. It fuses multi-agent outputs into a single actionable priority score (0-10).
+Responsibilities: (1) Maintain category_weights dictionary mapping 11 grievance categories to base risk scores (3.0-9.0). (2) Apply urgency bonus (+1.5 or +2.0 depending on base severity). (3) Apply sentiment impact (negative sentiment adds up to +1.5). (4) Cap final score at 10.0. (5) Map score to priority label (High ≥7.5, Medium ≥4.5, Low <4.5).
+Internal Components:
+  - DecisionAgent class:
+    - __init__(): Initializes category_weights dict for 11 categories.
+    - compute_priority(category, sentiment_score, is_urgent): Returns dict with 'priority' (str) and 'cci' (float).
+  CCI Formula: cci = min(base_score + urgency_bonus + sentiment_impact, 10.0)
+    - base_score: Looked up from category_weights (default 4.0).
+    - urgency_bonus: 2.0 if urgent AND base≥7.0; 1.5 if urgent AND base<7.0; 0.0 if not urgent.
+    - sentiment_impact: abs(sentiment_score) * 1.5 if sentiment_score < 0; else 0.
+Input Sources: Category (str), sentiment_score (float), is_urgent (bool) from grievance_pipeline.py.
+Output Destinations: Returns dict {"priority": str, "cci": float} to pipeline.
+Dependencies: None — pure Python logic.
+Runtime Behavior: Deterministic mathematical computation. Sub-millisecond execution.
+Interaction with Other Files: Called by grievance_pipeline.py. CCI score displayed across all UI surfaces.
+
+────────────────────────────────────────
+FILE 3.9: 3_agents/translation_agent/translator.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/3_agents/translation_agent/translator.py
+Purpose: AI agent that auto-detects input language and translates non-English text to English using Google Translate API.
+Why This File Exists: The system serves multilingual Indian citizens (Tamil, Hindi, Telugu, etc.). All downstream agents (BERT, VADER, urgency) operate on English text, so translation is the mandatory first pipeline step.
+Responsibilities: (1) Initialize GoogleTranslator with source='auto', target='en'. (2) Translate input text. (3) Detect if translation actually occurred by comparing input/output. (4) Return original text, translated text, translation flag, and detected source language.
+Internal Components:
+  - TranslationAgent class:
+    - __init__(): Initializes deep_translator.GoogleTranslator instance.
+    - translate(text): Returns dict with 'original_text', 'translated_text', 'is_translated' (bool), 'src_lang' (str).
+Input Sources: Raw user input text (any language) from grievance_pipeline.py.
+Output Destinations: Returns dict to pipeline. translated_text is passed to all subsequent agents.
+Dependencies: deep_translator (GoogleTranslator).
+Runtime Behavior: Makes HTTP call to Google Translate API. Latency depends on network (~200-500ms). Falls back to original text on failure.
+Interaction with Other Files: Called first in grievance_pipeline.py.
+Failure Handling: On exception, returns original text as translated_text with is_translated=False and src_lang="Error".
+
+────────────────────────────────────────
+FILE 3.10: 4_pipeline/grievance_pipeline.py (ACTIVE)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/4_pipeline/grievance_pipeline.py
+Purpose: Central orchestrator that chains all five AI agents into a sequential processing pipeline.
+Why This File Exists: Decouples agent execution order from the UI layer. Any frontend can call run_pipeline(text) and receive a fully analyzed result.
+Responsibilities: (1) Import all 5 agents via sys.path manipulation. (2) Initialize all agents in __init__. (3) Execute pipeline: Translate → Classify → Sentiment → Urgency → Decision. (4) Merge all results into a single flat dictionary.
+Internal Components:
+  - GrievanceOrchestrator class:
+    - __init__(): Instantiates TranslationAgent, ClassificationAgent, SentimentAgent, UrgencyAgent, DecisionAgent.
+    - run_pipeline(text): Executes 5-step sequential pipeline, returns merged dict with 14 fields: original_text, translated_text, is_translated, src_lang, category, confidence, sentiment_score, is_urgent, priority, cci.
+Input Sources: Raw text from citizen_portal.py, admin_dashboard.py, or app.py.
+Output Destinations: Returns flat dict consumed by UI layer and database storage.
+Dependencies: All 5 agent modules, sys, os.
+Runtime Behavior: Sequential execution. Total latency ~500ms-2s (dominated by translation API call and BERT inference).
+Interaction with Other Files: Imported and instantiated by citizen_portal.py and app.py.
+Failure Handling: Agent-level error handling propagates fallback values.
+
+────────────────────────────────────────
+FILE 3.11: 4_pipeline/grievance_pipeline_OLD.py (LEGACY)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/4_pipeline/grievance_pipeline_OLD.py
+Purpose: Legacy pipeline version without translation agent. Uses importlib for dynamic module loading.
+Why This File Exists: Historical reference. Predates the multilingual upgrade.
+Responsibilities: Same as active pipeline minus translation. Returns nested dict structure instead of flat.
+Runtime Behavior: Not invoked by any active component.
+
+────────────────────────────────────────
+FILE 3.12: utils/db_handler.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/utils/db_handler.py
+Purpose: Database abstraction layer providing MongoDB Atlas connectivity for complaint persistence.
+Why This File Exists: Centralizes all database operations (CRUD) into a single reusable module shared by citizen_portal.py and admin_dashboard.py.
+Responsibilities: (1) Connect to MongoDB Atlas cluster using URI with SSL/TLS via certifi. (2) Provide submit_complaint() for inserting new grievances with server timestamp. (3) Provide fetch_all_complaints() for retrieving all documents sorted by timestamp descending. (4) Provide clear_all_complaints() for system reset (demo/testing). (5) Track connection state via is_connected flag.
+Internal Components:
+  - DatabaseHandler class:
+    - __init__(): Connects to MongoDB Atlas, pings server, sets up db/collection references.
+    - submit_complaint(data_packet): Adds server_timestamp and status="Pending", inserts document, returns (success_bool, inserted_id_str).
+    - fetch_all_complaints(): Returns list of all documents sorted by server_timestamp descending.
+    - clear_all_complaints(): Deletes all documents in collection. Returns success boolean.
+    - verify_truth(): Placeholder for future AI truth verification.
+  Configuration constants: MONGO_URI, DB_NAME="civic_sentinel_db", COLLECTION_NAME="grievances".
+Input Sources: Data packets from citizen_portal.py (individual/batch submissions).
+Output Destinations: MongoDB Atlas cloud cluster. Returns data to admin_dashboard.py for display.
+Dependencies: pymongo, certifi, datetime, streamlit.
+Runtime Behavior: Connection established once at instantiation. All operations are synchronous. 5-second server selection timeout.
+Interaction with Other Files: Imported by citizen_portal.py and admin_dashboard.py via @st.cache_resource.
+Failure Handling: Graceful degradation to "Offline Mode" if connection fails. is_connected flag checked before all operations.
+
+────────────────────────────────────────
+FILE 3.13: utils/location_manager.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/utils/location_manager.py
+Purpose: GPS location utility that fetches the citizen's real-time browser geolocation coordinates.
+Why This File Exists: Grievance geolocation enables spatial analysis, map visualization, and emergency route calculation.
+Responsibilities: (1) Call browser Geolocation API via streamlit-js-eval component. (2) Return location dict with latitude/longitude coordinates. (3) Provide reverse_geocode() placeholder for address resolution.
+Internal Components:
+  - get_user_gps(): Calls get_geolocation() from streamlit_js_eval with component_key="user_gps_loc". Returns location dict or None.
+  - reverse_geocode(lat, lon): Placeholder that returns formatted coordinate string.
+Input Sources: Browser Geolocation API (requires user permission).
+Output Destinations: Returns dict to citizen_portal.py for map display and complaint metadata.
+Dependencies: streamlit, streamlit_js_eval.
+Runtime Behavior: Asynchronous browser API call. May take 1-5 seconds depending on GPS signal.
+Interaction with Other Files: Called by citizen_portal.py in the Location Intelligence column.
+Failure Handling: Returns None if location unavailable or permission denied.
+
+────────────────────────────────────────
+FILE 3.14: utils/route_engine.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/utils/route_engine.py
+Purpose: Emergency response routing engine ("Navigator") that calculates optimal driving routes from nearest emergency station to incident location.
+Why This File Exists: Core innovation — transforms the system from a passive complaint tracker into an active dispatch system by providing real-time route calculation.
+Responsibilities: (1) Maintain hardcoded emergency station registry for Vellore (Fire: 2 stations, Medical: 2 stations, Civil: 2 stations). (2) Compute haversine distance between incident and all stations. (3) Identify nearest station by category. (4) Fetch driving route geometry from Mapbox Directions API. (5) Return GeoJSON geometry for PyDeck visualization.
+Internal Components:
+  - EMERGENCY_STATIONS dict: 3 categories (Fire, Medical, Civil), 6 total stations with name/lat/lon.
+  - haversine_distance(lat1, lon1, lat2, lon2): Great-circle distance calculation in kilometers.
+  - find_nearest_station(incident_lat, incident_lon, category): Returns nearest station dict with name, lat, lon, distance_km.
+  - get_route_geometry(start_lat, start_lon, end_lat, end_lon): Calls Mapbox Directions API, returns GeoJSON geometry dict or None.
+Input Sources: Incident coordinates and category from admin_dashboard.py.
+Output Destinations: Returns station dict and route GeoJSON to admin_dashboard.py for PyDeck rendering.
+Dependencies: streamlit (for secrets), requests, math.
+Runtime Behavior: API call to Mapbox (~200-500ms). Falls back gracefully if API unavailable.
+Interaction with Other Files: Called by admin_dashboard.py in the Navigator section. Reads Mapbox token from .streamlit/secrets.toml.
+Failure Handling: Returns None if Mapbox token missing, API fails, or no routes found. Defaults to "Civil" category if unknown category provided.
+
+────────────────────────────────────────
+FILE 3.15: utils/report_generator.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/utils/report_generator.py
+Purpose: Generates official PDF situation reports from batch-processed grievance data.
+Why This File Exists: Provides downloadable official reports for administrative record-keeping and briefings.
+Responsibilities: (1) Generate header with timestamp and zone. (2) Executive summary with total complaints, critical count, average risk. (3) High-priority incident table with ID, Category, CCI, and Description. (4) Latin-1 text sanitization for PDF compatibility.
+Internal Components:
+  - PDFReport(FPDF) class: Custom FPDF subclass with branded header/footer.
+  - clean_text(text): Encodes text to latin-1 replacing unsupported characters.
+  - generate_pdf(dataframe): Creates PDF from DataFrame, writes to temp_report.pdf, returns file path.
+Input Sources: Pandas DataFrame from app.py batch processing results.
+Output Destinations: temp_report.pdf file on disk, read into memory by app.py for st.download_button.
+Dependencies: fpdf (FPDF), pandas, datetime.
+Runtime Behavior: Generates PDF in-memory, writes to disk, caller reads and deletes temp file.
+Interaction with Other Files: Called by 7_mvp_application/app.py.
+Failure Handling: clean_text() prevents encoding crashes from non-Latin characters.
+
+────────────────────────────────────────
+FILE 3.16: citizen_portal.py (PRIMARY APPLICATION)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/citizen_portal.py
+Purpose: Citizen-facing Streamlit web application for submitting grievances with multimodal input.
+Why This File Exists: Primary user interface for citizens. Provides text, voice, and image input with GPS geolocation, AI-powered image verification, and real-time ticket tracking.
+Responsibilities: (1) Render 3-tab UI: Report Grievance, Batch Upload, Track Status. (2) Load and cache CLIP model for image verification. (3) Load GrievanceOrchestrator pipeline. (4) Connect to MongoDB via DatabaseHandler. (5) Process individual submissions with full metadata (GPS, image, verification score). (6) Process batch JSON uploads. (7) Provide ticket tracking by ObjectId.
+Internal Components:
+  - load_clip_model(): Cached loading of openai/clip-vit-base-patch32 zero-shot image classifier.
+  - load_orchestrator(): Cached GrievanceOrchestrator instantiation.
+  - get_db_handler(): Cached DatabaseHandler connection.
+  - transcribe_audio(audio_file, lang_code): Google Speech Recognition transcription.
+  - Tab 1 (Report Grievance): 3-column layout — Details (email, text), Evidence & Voice (image upload, audio recording, CLIP verification), Location Intelligence (GPS, map).
+  - Tab 2 (Batch Upload): JSON file upload, batch pipeline processing, database insertion.
+  - Tab 3 (Track Status): Ticket ID search via MongoDB ObjectId lookup, status display with admin remarks.
+Input Sources: User text, uploaded images (JPG/PNG), audio recordings (WAV), GPS coordinates.
+Output Destinations: MongoDB Atlas (via db_handler.py). UI feedback to user.
+Dependencies: streamlit, transformers (pipeline), PIL, speech_recognition, bson, pandas, json, io, base64.
+Runtime Behavior: Runs as Streamlit server (streamlit run citizen_portal.py). CLIP model loaded once (~2GB memory). Pipeline cached across sessions.
+Interaction with Other Files: Imports from db_handler.py, grievance_pipeline.py, location_manager.py.
+Failure Handling: ImportError catch at startup. CLIP verification failure shows warning. Voice transcription failure returns None silently.
+
+────────────────────────────────────────
+FILE 3.17: admin_dashboard.py (PRIMARY APPLICATION)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/admin_dashboard.py
+Purpose: Administrative Command Center for monitoring, analyzing, dispatching, and resolving citizen grievances in real-time.
+Why This File Exists: Government administrators need a comprehensive operational dashboard to triage complaints, visualize spatial distribution, dispatch response units, and communicate resolutions to citizens.
+Responsibilities: (1) Connect to MongoDB and fetch all complaints. (2) Process raw data: convert ObjectIds, extract GPS from nested/flat structures, normalize text fields, auto-assign departments. (3) Display KPI metrics (total tickets, critical ops, avg response, mean risk). (4) Render 3D geospatial heatmap with PyDeck ColumnLayer. (5) Render arc vector overlays for single-department dispatch visualization. (6) Display global analytics (priority distribution donut, sentiment matrix scatter, risk-by-unit bar). (7) Provide Ticket Resolution Desk with incident details, Navigator route map, status update form, and email notification system ("Echo"). (8) Render live incident feed table.
+Internal Components:
+  - send_notification_email(): SMTP email sender via Gmail with HTML template.
+  - VELLORE_HUBS: Multi-hub emergency station configuration for arc visualization.
+  - get_dept_hub(): Fuzzy department-to-hub matcher.
+  - assign_department(): AI auto-dispatcher using keyword analysis.
+  - get_lat()/get_lon(): Hybrid GPS extraction from flat or nested data.
+  - get_grievance_text(): Robust text extraction from multiple possible field names.
+  - Navigator Integration: Calls route_engine.find_nearest_station() and get_route_geometry().
+  - Echo Notification System: Sends professional HTML emails to citizens on status updates.
+Input Sources: MongoDB Atlas (all complaints), Mapbox API (routes).
+Output Destinations: Streamlit UI, email notifications to citizens, MongoDB updates (status, admin_comment).
+Dependencies: streamlit, pandas, altair, pydeck, pymongo, bson, smtplib, email, requests.
+Runtime Behavior: Runs as Streamlit server (streamlit run admin_dashboard.py). Fetches all data on each page load. Real-time sync via st.rerun().
+Interaction with Other Files: Imports from db_handler.py, route_engine.py. Reads from MongoDB (shared with citizen_portal.py).
+Failure Handling: Zero-crash policy with database offline detection, ObjectId conversion errors, missing GPS fallback to Vellore center coordinates.
+
+────────────────────────────────────────
+FILE 3.18: 7_mvp_application/app.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/7_mvp_application/app.py
+Purpose: Standalone MVP application for demonstration without database dependency.
+Why This File Exists: Provides a self-contained demo that runs without MongoDB, using in-memory session state for data persistence.
+Responsibilities: (1) Live single-ticket processing with translation showcase. (2) Batch JSON processing with in-memory DataFrame storage. (3) PDF report generation and download. (4) Geospatial map visualization from batch data. (5) Full analytics dashboard (priority donut, category bar, sentiment scatter, risk-by-dept bar).
+Internal Components: 4-tab interface (Live Ticket, Batch & Queue, Geospatial Intel, Global Analytics).
+Input Sources: User text input, uploaded JSON files.
+Output Destinations: In-memory session state, downloadable PDF report.
+Dependencies: streamlit, pandas, json, altair, pydeck, report_generator.
+Runtime Behavior: Stateless between sessions. All data stored in st.session_state.
+Interaction with Other Files: Imports grievance_pipeline.py and report_generator.py.
+
+────────────────────────────────────────
+FILE 3.19: 7_mvp_application/app_OLD.py (LEGACY)
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/7_mvp_application/app_OLD.py
+Purpose: Legacy standalone MVP with flatten_result() adapter for nested pipeline output format.
+Why This File Exists: Historical reference from before the pipeline was refactored to return flat dictionaries.
+Runtime Behavior: Not actively used.
+
+────────────────────────────────────────
+FILE 3.20: requirements.txt
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/requirements.txt
+Purpose: Python dependency manifest for pip installation.
+Why This File Exists: Specifies all third-party packages required to run the system.
+Responsibilities: Lists 14 packages across 4 categories: Core Framework (streamlit, streamlit-js-eval, watchdog), Data & Database (pandas, pymongo, requests), Visualization (pydeck, altair), AI/ML (torch, transformers, Pillow), Utilities (geopy, SpeechRecognition, pydub, python-dotenv).
+Dependencies implicitly required but not listed: deep_translator, nltk, fpdf, certifi, smtplib (stdlib).
+
+────────────────────────────────────────
+FILE 3.21: reset_db_test.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/reset_db_test.py
+Purpose: Standalone script to test database connection and reset (clear all documents).
+Why This File Exists: Utility for development/testing to quickly verify MongoDB connectivity and purge test data.
+Internal Components: test_reset() function instantiates DatabaseHandler and calls clear_all_complaints().
+
+────────────────────────────────────────
+FILE 3.22: test_clip.py
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/test_clip.py
+Purpose: Hardware capability benchmark for CLIP model inference speed.
+Why This File Exists: Determines whether the deployment machine can run real-time image verification by testing CLIP inference latency on a synthetic image.
+Internal Components: test_system_capability() loads CLIP model, creates red test image, runs zero-shot classification, reports timing verdict (<2s: Excellent, <6s: Good, >6s: Slow).
+
+────────────────────────────────────────
+FILE 3.23: 0_project_overview/project_summary.md
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/0_project_overview/project_summary.md
+Purpose: Markdown summary of the multi-agent architecture listing all 5 agents and their roles.
+
+────────────────────────────────────────
+FILE 3.24: README.md
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/README.md
+Purpose: Repository front page documenting project title, key novelty (CCI, Multi-Agent Architecture), and setup placeholder.
+
+────────────────────────────────────────
+FILE 3.25: progress.txt
+────────────────────────────────────────
+File Location: Citizen-Grievance-Prioritization/progress.txt
+Purpose: Project status report documenting identity, architecture, tech stack, features, novelty, and current operational status.
+
+
+============================================================
+SECTION 4 — SYSTEM ARCHITECTURE DESIGN
+============================================================
+
+Architectural Style:
+Monolithic Multi-Agent Pipeline Architecture. The system is a single-deployment Python application using Streamlit as the web framework, with five specialized AI agents orchestrated by a central pipeline class (GrievanceOrchestrator). Two Streamlit applications (citizen_portal.py and admin_dashboard.py) share the same database and utility modules.
+
+Component Separation Strategy:
+The codebase follows a numbered-directory convention for logical separation:
+  - 3_agents/: Individual AI agent modules, each in its own subdirectory.
+  - 4_pipeline/: Orchestration layer that chains agents.
+  - 7_mvp_application/: Standalone MVP without database dependency.
+  - utils/: Shared utility modules (database, GPS, routing, PDF generation).
+  - Root-level: Primary production applications (citizen_portal.py, admin_dashboard.py).
+
+Service Boundaries:
+Single process per Streamlit application. Two concurrent Streamlit servers run:
+  1. citizen_portal.py — port 8501 (default) — citizen-facing.
+  2. admin_dashboard.py — separate port — admin-facing.
+Both share MongoDB Atlas as the persistence layer. No inter-process communication; synchronization happens through shared database state.
+
+Data Flow Design:
+  Citizen Input (Text/Voice/Image)
+    → [citizen_portal.py] Voice Transcription (Google Speech API)
+    → [citizen_portal.py] Image Verification (CLIP zero-shot classification)
+    → [grievance_pipeline.py] Translation (Google Translate via deep_translator)
+    → [grievance_pipeline.py] Classification (Fine-tuned DistilBERT)
+    → [grievance_pipeline.py] Sentiment Analysis (NLTK VADER)
+    → [grievance_pipeline.py] Urgency Detection (Regex keyword + negation)
+    → [grievance_pipeline.py] Decision (CCI calculation)
+    → [citizen_portal.py] GPS Attachment + Database Submission (MongoDB Atlas)
+    → [admin_dashboard.py] Fetch All → Auto-Department Assignment → KPI Metrics
+    → [admin_dashboard.py] 3D Geospatial Heatmap (PyDeck)
+    → [admin_dashboard.py] Navigator Route Calculation (Mapbox API)
+    → [admin_dashboard.py] Ticket Resolution + Email Notification (SMTP/Gmail)
+
+State Management Strategy:
+  - Session-Level: Streamlit st.session_state stores cached model instances, batch data, and UI state (GPS coordinates, form values).
+  - Persistent: MongoDB Atlas stores all submitted complaints with server timestamps.
+  - Cached Resources: @st.cache_resource decorators prevent re-loading ML models and database connections across Streamlit reruns.
+
+Model Lifecycle:
+  1. DistilBERT (Classification): Loaded from local bert_brain/ directory at first request. Cached via @st.cache_resource. Read-only inference.
+  2. CLIP (Image Verification): Loaded from Hugging Face Hub at first request. Cached. ~600MB download on first run.
+  3. VADER (Sentiment): Lexicon file downloaded via nltk.download() on first use. Cached in NLTK data directory.
+
+Configuration Management:
+  - API secrets stored in .streamlit/secrets.toml (Mapbox token).
+  - Email credentials hardcoded in admin_dashboard.py (SENDER_EMAIL, APP_PASSWORD).
+  - MongoDB URI hardcoded in utils/db_handler.py.
+  - Emergency station coordinates hardcoded in utils/route_engine.py and admin_dashboard.py.
+  - No environment variable loading in production use.
+
+Logging Strategy:
+  - Console-based logging via print() statements throughout all modules.
+  - Formatted with emoji prefixes for visual scanning (✅, ⚠️, ❌, 🔄).
+  - No structured logging framework (no logging module, no log files).
+  - Admin dashboard displays debug expanders for GPS telemetry and route data.
+
+Error Handling Strategy:
+  - Try/except blocks at every external boundary (API calls, database operations, model inference).
+  - Graceful degradation: Database offline → system continues in read-only/offline mode.
+  - UI-level error display via st.error(), st.warning(), st.toast().
+  - Fallback values for all agent outputs (e.g., "System Error" category, 0.0 confidence).
+  - Zero-crash policy enforced in admin_dashboard.py with mandatory data validation.
+
+Scalability Considerations:
+  - Horizontal: Not currently designed for horizontal scaling. Single-instance Streamlit servers.
+  - Vertical: BERT inference is CPU-bound; GPU would improve classification throughput.
+  - Database: MongoDB Atlas provides built-in horizontal scaling and replication.
+  - Bottleneck: Sequential pipeline execution — all 5 agents run serially per complaint.
+
+Security Considerations:
+  - MongoDB Atlas connection uses TLS/SSL via certifi.
+  - Mapbox token stored in secrets.toml (not committed to Git via .gitignore).
+  - Email credentials (Gmail App Password) are hardcoded — security risk in production.
+  - No authentication/authorization on Streamlit interfaces.
+  - No input sanitization beyond CLIP verification and email format check.
+  - Image data stored as base64 string in MongoDB — no file upload vulnerability.
+
+
+============================================================
+SECTION 5 — COMPLETE END-TO-END WORKFLOW
+============================================================
+
+STEP 1: System Initialization
+  Both Streamlit applications (citizen_portal.py and admin_dashboard.py) are started as separate processes via:
+    $ streamlit run citizen_portal.py
+    $ streamlit run admin_dashboard.py
+
+STEP 2: Configuration Loading
+  - Streamlit reads .streamlit/secrets.toml automatically at startup.
+  - Mapbox token becomes available via st.secrets["general"]["mapbox_token"].
+
+STEP 3: Model Loading (First Request Only)
+  citizen_portal.py:
+    3a. @st.cache_resource loads CLIP pipeline (openai/clip-vit-base-patch32) — ~600MB, 10-30s first load.
+    3b. @st.cache_resource instantiates GrievanceOrchestrator:
+      → TranslationAgent: GoogleTranslator initialized (no model download).
+      → ClassificationAgent: DistilBERT loaded from bert_brain/ (~268MB), set to eval().
+      → SentimentAgent: VADER lexicon downloaded if missing.
+      → UrgencyAgent: Keyword lists initialized (no external resources).
+      → DecisionAgent: Category weights dict initialized.
+    3c. @st.cache_resource connects DatabaseHandler to MongoDB Atlas.
+  admin_dashboard.py:
+    3d. @st.cache_resource connects DatabaseHandler to MongoDB Atlas.
+
+STEP 4: Database Initialization
+  - DatabaseHandler.__init__() creates pymongo.MongoClient with 5-second timeout and TLS.
+  - Pings MongoDB Atlas via client.admin.command('ping').
+  - Accesses database "civic_sentinel_db" and collection "grievances".
+  - Sets is_connected = True on success, False on failure.
+
+STEP 5: Citizen Submits Grievance (citizen_portal.py)
+  5a. Citizen enters email and grievance text.
+  5b. Optional: Uploads image → CLIP verifies relevance against text (>30% match = Verified, else Flagged).
+  5c. Optional: Records voice → Google Speech Recognition transcribes to text.
+  5d. GPS: Browser geolocation fetched via streamlit-js-eval, or manual coordinates.
+  5e. Citizen clicks "Submit Individual Grievance".
+
+STEP 6: Pipeline Execution (grievance_pipeline.py)
+  6a. TranslationAgent.translate(text): Auto-detects language, translates to English.
+  6b. ClassificationAgent.predict(english_text): DistilBERT classifies into 1 of 11 categories.
+  6c. SentimentAgent.analyze(english_text): VADER computes compound sentiment score.
+  6d. UrgencyAgent.analyze_urgency(english_text): Regex checks negation patterns, then urgent keywords.
+  6e. DecisionAgent.compute_priority(category, sentiment, urgency): Computes CCI score and priority label.
+  6f. All results merged into flat dictionary with 14+ fields.
+
+STEP 7: Data Persistence
+  7a. Pipeline results merged with metadata (email, GPS, image data, verification score, status="New").
+  7b. DatabaseHandler.submit_complaint() adds server_timestamp and status="Pending".
+  7c. Document inserted into MongoDB Atlas "grievances" collection.
+  7d. Inserted ObjectId returned as ticket ID to citizen.
+
+STEP 8: Admin Dashboard Data Pipeline (admin_dashboard.py)
+  8a. DatabaseHandler.fetch_all_complaints() retrieves all documents.
+  8b. Raw data converted to Pandas DataFrame.
+  8c. ObjectIds converted to strings.
+  8d. Numeric columns (cci, sentiment_score) coerced to float.
+  8e. Text extracted from multiple possible field names.
+  8f. GPS coordinates extracted from flat or nested structures.
+  8g. Departments auto-assigned via keyword analysis of category + text.
+  8h. Sidebar filters applied.
+
+STEP 9: Visualization and Analytics
+  9a. KPI metrics rendered (total tickets, critical ops, avg response, mean risk).
+  9b. 3D geospatial heatmap rendered via PyDeck ColumnLayer (elevation = CCI * 100).
+  9c. Arc vectors rendered for single-department dispatch mode.
+  9d. Altair charts: priority donut, sentiment scatter, risk-by-unit bar.
+
+STEP 10: Ticket Resolution
+  10a. Admin selects ticket from dropdown.
+  10b. Incident details displayed (description, language, image evidence indicator).
+  10c. Navigator calculates route: find_nearest_station() → get_route_geometry() → PyDeck PathLayer.
+  10d. Admin updates status (Pending/In Progress/Resolved/Rejected) and adds remarks.
+  10e. MongoDB document updated with new status, admin_comment, and timestamp.
+
+STEP 11: Email Notification (Echo System)
+  11a. If citizen email exists in ticket data, send_notification_email() triggered.
+  11b. Text cleaned of non-ASCII characters.
+  11c. MIME multipart email constructed (plain text + HTML template).
+  11d. Sent via Gmail SMTP (smtp.gmail.com:587, STARTTLS).
+  11e. Success/failure feedback shown to admin.
+
+STEP 12: Shutdown Behavior
+  Streamlit processes terminate via Ctrl+C or process kill. No graceful shutdown hooks. MongoDB connections closed by pymongo destructor.
+
+STEP 13: Restart / Recovery
+  Full system restart by re-running streamlit commands. All state recovered from MongoDB Atlas. Cached models reloaded on first request. No checkpoint files.
+
+
+============================================================
+SECTION 6 — DEPLOYMENT & EXECUTION GUIDE
+============================================================
+
+Environment Setup:
+  1. Python 3.9+ required (3.10 or 3.11 recommended).
+  2. Clone repository or copy project directory.
+  3. Create virtual environment:
+       $ python -m venv .venv
+       $ source .venv/bin/activate
+
+Dependency Installation:
+  $ pip install -r requirements.txt
+  Additional dependencies not in requirements.txt:
+  $ pip install deep-translator nltk fpdf certifi
+
+NLTK Data Download (automatic on first run, or manual):
+  $ python -c "import nltk; nltk.download('vader_lexicon')"
+
+BERT Model:
+  The bert_brain/ directory must contain model.safetensors, config.json, tokenizer.json, tokenizer_config.json. These files are excluded from Git via .gitignore and must be obtained separately (from training output or shared storage).
+
+Environment Variables / Secrets:
+  1. .streamlit/secrets.toml must contain:
+     [general]
+     mapbox_token = "YOUR_MAPBOX_PUBLIC_TOKEN"
+  2. In admin_dashboard.py, update:
+     SENDER_EMAIL = "your_gmail@gmail.com"
+     APP_PASSWORD = "your_gmail_app_password"
+  3. In utils/db_handler.py, update MONGO_URI with your MongoDB Atlas connection string.
+
+Running Locally:
+  Terminal 1 (Citizen Portal):
+    $ streamlit run citizen_portal.py
+  Terminal 2 (Admin Dashboard):
+    $ streamlit run admin_dashboard.py
+  Terminal 3 (Standalone MVP — no database required):
+    $ streamlit run 7_mvp_application/app.py
+
+Docker Deployment:
+  Not currently containerized. To dockerize:
+  1. Create Dockerfile based on python:3.11-slim.
+  2. COPY project files, install requirements.
+  3. EXPOSE ports 8501 and 8502.
+  4. CMD: streamlit run citizen_portal.py & streamlit run admin_dashboard.py
+
+Testing:
+  $ python test_clip.py         # Test CLIP model inference speed
+  $ python reset_db_test.py     # Test MongoDB connectivity and reset
+  $ python 4_pipeline/grievance_pipeline_OLD.py  # Test legacy pipeline standalone
+
+Monitoring:
+  - Console output with emoji-prefixed log messages.
+  - Admin dashboard Debug expanders for GPS telemetry and route data.
+  - MongoDB Atlas dashboard for database monitoring.
+  - Streamlit built-in server logs.
+
+Production Deployment:
+  1. Replace hardcoded credentials with environment variables.
+  2. Add authentication (Streamlit authentication or reverse proxy).
+  3. Enable HTTPS via reverse proxy (Nginx/Caddy).
+  4. Deploy on cloud VM (AWS EC2, GCP Compute Engine) or Platform-as-a-Service.
+  5. Use process manager (systemd, supervisord) for Streamlit servers.
+  6. Configure MongoDB Atlas IP whitelist for production IP.
+
+
+============================================================
+SECTION 7 — AI CONTEXT REHYDRATION BLOCK
+============================================================
+
+AI_CONTEXT_REHYDRATION_SUMMARY
+
+System Identity:
+  - Name: Civic Sentinel
+  - Type: AI-Powered Citizen Grievance Prioritization System
+  - Domain: Civic Technology + AI/ML + Geospatial Intelligence
+  - Architecture: Monolithic Multi-Agent Pipeline (5 agents)
+  - Database: MongoDB Atlas (cloud NoSQL)
+  - Frontend: Streamlit (2 applications)
+  - Core Innovation: Civil Criticality Index (CCI) — composite priority score 0-10
+
+Core Modules:
+  1. TranslationAgent (translator.py) — Google Translate auto-detect → English
+  2. ClassificationAgent (classifier.py) — Fine-tuned DistilBERT → 11 categories
+  3. SentimentAgent (sentiment.py) — NLTK VADER → compound score (-1 to +1)
+  4. UrgencyAgent (urgency_detect.py) — Regex keyword + negation → boolean
+  5. DecisionAgent (decision.py) — CCI = base_weight + urgency_bonus + sentiment_impact → priority label
+  6. GrievanceOrchestrator (grievance_pipeline.py) — Sequential orchestrator: 1→2→3→4→5
+  7. DatabaseHandler (db_handler.py) — MongoDB Atlas CRUD operations
+  8. LocationManager (location_manager.py) — Browser GPS via streamlit-js-eval
+  9. RouteEngine (route_engine.py) — Mapbox Directions API + haversine nearest-station
+  10. ReportGenerator (report_generator.py) — FPDF-based PDF situation reports
+  11. CitizenPortal (citizen_portal.py) — Multimodal input + CLIP verification + batch upload + tracking
+  12. AdminDashboard (admin_dashboard.py) — 3D heatmap + Navigator routing + Echo emails + resolution desk
+
+Data Flow (Short Form):
+  User Input → Translation → BERT Classification → VADER Sentiment → Urgency Keywords → CCI Decision → MongoDB → Admin Fetch → Auto-Dispatch → PyDeck Map → Navigator Route → Status Update → Email Notification
+
+Critical Dependencies:
+  - torch + transformers: DistilBERT inference (classification_agent)
+  - deep_translator: Google Translate API (translation_agent)
+  - nltk: VADER sentiment lexicon (sentiment_agent)
+  - pymongo + certifi: MongoDB Atlas connectivity (db_handler)
+  - streamlit + streamlit-js-eval: Web UI + browser geolocation
+  - pydeck: 3D map visualization (admin_dashboard)
+  - requests: Mapbox Directions API (route_engine)
+  - fpdf: PDF report generation (report_generator)
+  - Pillow: Image processing for CLIP verification
+  - speech_recognition: Google Speech API for voice input
+  - smtplib: Gmail SMTP for citizen notifications
+
+Core Execution Sequence:
+  1. Start Streamlit servers (citizen_portal.py, admin_dashboard.py)
+  2. Load secrets.toml (Mapbox token)
+  3. Cache-load models (CLIP, DistilBERT, VADER)
+  4. Connect MongoDB Atlas (DatabaseHandler)
+  5. Citizen submits grievance (text/voice/image + GPS)
+  6. Pipeline: Translate → Classify → Sentiment → Urgency → CCI Decision
+  7. Store in MongoDB with metadata
+  8. Admin dashboard fetches all complaints
+  9. Auto-assign departments, compute KPIs
+  10. Render 3D heatmap, analytics charts
+  11. Select ticket → Navigator calculates route from nearest station
+  12. Update status → Echo email notification to citizen
+
+CCI Formula:
+  CCI = min(category_base_score + urgency_bonus + sentiment_impact, 10.0)
+  Priority: High (≥7.5) | Medium (≥4.5) | Low (<4.5)
+
+Category Base Scores:
+  Fire & Disaster: 9.0 | Public Safety & Emergency: 8.0 | Medical & Health: 8.0
+  Electrical & Power: 7.0 | Water Supply & Drainage: 6.0
+  Roads & Transportation: 5.0 | Sanitation: 5.0 | Traffic: 4.0
+  Noise & Environmental: 3.0 | Animal-Related: 3.0 | Urban Facilities: 3.0
+
+Emergency Station Registry (Vellore):
+  Fire: Vellore Central (12.9165, 79.1325), Katpadi (12.9680, 79.1450)
+  Medical: Govt Medical College (12.8750, 79.1150), CMC (12.9245, 79.1350)
+  Civil: Police HQ (12.9200, 79.1300), Collectorate (12.9300, 79.1400)

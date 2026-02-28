@@ -10,8 +10,8 @@ from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="VIT Civic Sentinel",
-    page_icon="📡",
+    page_title="TARP Project MVP",
+    page_icon="📖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -54,7 +54,7 @@ if 'pdf_data' not in st.session_state:
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("📡 VIT Sentinel")
+    st.title("📡 TARP Project MVP")
     st.caption("v4.0 | Official Release Build")
     st.markdown("---")
     st.subheader("System Status")
@@ -79,7 +79,7 @@ tab_live, tab_batch, tab_map, tab_analytics = st.tabs([
 # TAB 1: LIVE TICKET (Multilingual)
 # ==========================================
 with tab_live:
-    st.subheader("📝 Rapid Incident Reporting (Multilingual)")
+    st.subheader("Single Report Processing")
     st.caption("Try typing in Hindi, Tamil, Telugu, Spanish, etc.")
     
     col1, col2 = st.columns([2, 1])

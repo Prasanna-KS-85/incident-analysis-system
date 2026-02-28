@@ -1,0 +1,36 @@
+SECTION 1: PROJECT IDENTITY
+Project Name: Civic Sentinel (Intelligent Citizen Grievance Prioritization System).
+Tagline: "Your Voice, Our Action."
+Core Mission: Bridging the gap between civic complaints and rapid emergency response using AI and Geospatial Intelligence.
+
+SECTION 2: SYSTEM ARCHITECTURE (The Workflow)
+User submits complaint (Text/Audio/Image) -> AI Analysis (BERT/YOLO) -> Priority Scoring -> Database (MongoDB) -> Admin Command Center -> Route Calculation -> Dispatch.
+
+SECTION 3: TECH STACK (The Tools)
+Frontend: Streamlit (Python).
+Backend Logic: Python (Pandas, NumPy).
+Database: MongoDB Atlas (Cloud NoSQL).
+Geospatial Engine: Mapbox API (Routing), PyDeck (3D Visualization), Streamlit-JS-Eval (GPS).
+AI/ML Models: Transformers (BERT for text classification), PyTorch.
+Design System: Custom CSS Injection (Monochrome "Dark Mode" Aesthetic).
+
+SECTION 4: KEY FEATURES IMPLEMENTED (The "What")
+Citizen Portal:
+Auto-GPS Fetching (Browser-based Geolocation).
+Multi-modal Input (Voice Recording, Image Upload, Text).
+Real-time "Lock" confirmation.
+Admin Command Center:
+The "Navigator" (NEW): Real-time emergency route calculation from nearest station (Fire/Police) to incident.
+3D Visualization: PyDeck integration showing route lines (Cyan/Red) and station locations.
+Global Heatmap: Geospatial overview of all tickets.
+Visual Identity: Strict Black & White "Command Terminal" UI.
+
+SECTION 5: NOVELTY & IMPACT (The "Why")
+Smart Routing: Unlike standard apps, we don't just list complaints; we calculate the fastest path for response units.
+AI Triage: We prioritize based on severity, not just time of submission.
+Infrastructure Independence: Works on any device with a browser; no app install required.
+
+SECTION 6: CURRENT STATUS
+State that the MVP is Functional.
+State that the "Navigator" routing engine is Active and Verified.
+State that the Database connection is Live.

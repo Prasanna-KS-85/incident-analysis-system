@@ -10,5 +10,8 @@ An Explainable, Multi-Agent Decision Intelligence System for prioritizing citize
 <!-- How to Run -->
 (Placeholder for setup instructions)
 
+### ⚠️ Important Setup Note for ML Models
+Due to GitHub file size limits, the fine-tuned DistilBERT model is not included in this repository. To run the classification agent, you must download the `bert_brain` folder and place it inside `3_agents/classification_agent/` before running the Streamlit apps.
+
 ## Project Status
 - **Phase 1: Setup**: Complete
