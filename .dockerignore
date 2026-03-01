@@ -1,0 +1,13 @@
+# Version control
+.git/
+.gitignore
+# Virtual environments and cache
+.venv/
+venv/
+env/
+pycache/
+*.py[cod]
+
+# OS generated files
+.DS_Store
+temp_report.pdf
