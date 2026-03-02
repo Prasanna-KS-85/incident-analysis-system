@@ -483,19 +483,18 @@ c4.metric("MEAN RISK IDX", f"{df['cci'].mean():.1f}/10")
 
 st.markdown("---")
 
-# --- 6. 3D GEOSPATIAL MAP (VELLORE CENTERING) ---
+# --- 6. 3D GEOSPATIAL MAP (CHENNAI CENTERING) ---
 st.subheader("🌍 GEOSPATIAL HEATMAP")
 
 # Filter for valid data > 10 (Avoid Ocean)
 valid_geo = df[(df['lat'] > 10) & (df['lon'] > 70)].copy()
 
 if not valid_geo.empty:
-    mid_lat = valid_geo['lat'].mean()
-    mid_lon = valid_geo['lon'].mean()
+    center_lat = valid_geo['lat'].mean()
+    center_lon = valid_geo['lon'].mean()
 else:
-    # FORCE DEFAULT TO VELLORE
-    mid_lat = 12.9165
-    mid_lon = 79.1325
+    # FORCE DEFAULT TO CHENNAI
+    center_lat, center_lon = 13.0827, 80.2707
 
 col_map, col_legend = st.columns([3, 1])
 
@@ -525,10 +524,10 @@ with col_map:
     )
 
     view_state = pdk.ViewState(
-        latitude=mid_lat,
-        longitude=mid_lon,
-        zoom=13,
-        pitch=45, # 3D Perspective
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=10,
+        pitch=50, # 3D Perspective
         bearing=0
     )
 
