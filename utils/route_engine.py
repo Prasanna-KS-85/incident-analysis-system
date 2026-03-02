@@ -13,25 +13,40 @@ def get_gmaps_client():
         return None
 
 def get_facility_type(category, grievance_text=""):
-    """Maps the grievance category and text to a Google Places API facility type."""
+    """Maps the grievance to a Google Places Type and a specific search keyword."""
     cat = str(category).lower()
     text = str(grievance_text).lower()
     
     # 1. Medical Emergencies
     if "medical" in cat or "health" in cat or any(w in text for w in ["medical", "injury", "ambulance", "accident", "heart"]):
-        return "hospital"
+        return {"type": "hospital"}
         
     # 2. Fire Emergencies
-    if "fire" in cat or any(w in text for w in ["fire", "smoke", "burn"]):
-        return "fire_station"
+    if "fire" in cat or any(w in text for w in ["fire", "smoke", "burn", "aag"]):
+        return {"type": "fire_station"}
         
     # 3. Police / Law Enforcement
-    if "crime" in cat or "safety" in cat or "security" in cat or any(w in text for w in ["police", "theft", "assault", "fight"]):
-        return "police"
+    if "crime" in cat or "safety" in cat or "security" in cat or any(w in text for w in ["police", "theft", "assault", "fight", "snatching"]):
+        return {"type": "police"}
         
-    # 4. Civil / Infrastructure (Water, Sanitation, Roads, Noise, Environment)
-    # Defaults to municipal offices for city management issues
-    return "local_government_office"
+    # 4. Civic Issues - Electricity
+    if any(w in text for w in ["light", "electricity", "power", "transformer", "wire"]):
+        return {"type": "local_government_office", "keyword": "Electricity Board TNEB BESCOM"}
+        
+    # 5. Civic Issues - Water & Flooding
+    if any(w in text for w in ["water", "flood", "pipe", "drain", "clogging"]):
+        return {"type": "local_government_office", "keyword": "Water Board CMWSSB"}
+        
+    # 6. Civic Issues - Roads & Sanitation
+    if any(w in text for w in ["road", "pothole", "garbage", "trash"]):
+        return {"type": "local_government_office", "keyword": "Municipal Corporation"}
+        
+    # 7. Animal Rescue
+    if any(w in text for w in ["animal", "deer", "dog", "cow"]):
+        return {"type": "veterinary_care", "keyword": "Animal Rescue Blue Cross"}
+        
+    # Default Fallback for anything else
+    return {"type": "local_government_office", "keyword": "Municipal Corporation"}
 
 def find_nearest_station(incident_lat, incident_lon, category, grievance_text=""):
     """Dynamically finds the nearest appropriate facility using Google Places API."""
@@ -39,25 +54,31 @@ def find_nearest_station(incident_lat, incident_lon, category, grievance_text=""
     if not gmaps:
         return None
 
-    facility_type = get_facility_type(category, grievance_text)
+    facility_info = get_facility_type(category, grievance_text)
+    fac_type = facility_info["type"]
+    fac_keyword = facility_info.get("keyword") # This might be None
+    
     try:
-        # Search for the nearest facility within a 10km radius
-        places_result = gmaps.places_nearby(
-            location=(incident_lat, incident_lon),
-            radius=10000,
-            type=facility_type
-        )
-
+        # Build search parameters dynamically
+        search_params = {
+            "location": (incident_lat, incident_lon),
+            "radius": 10000,
+            "type": fac_type
+        }
+        if fac_keyword:
+            search_params["keyword"] = fac_keyword
+            
+        places_result = gmaps.places_nearby(**search_params)
+        
         if not places_result.get('results'):
             return None
             
-        # Get the closest result
         nearest = places_result['results'][0]
         return {
             "name": nearest['name'],
             "lat": nearest['geometry']['location']['lat'],
             "lon": nearest['geometry']['location']['lng'],
-            "type": facility_type
+            "type": fac_type
         }
     except Exception as e:
         st.error(f"Error fetching nearby places: {e}")
