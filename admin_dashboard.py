@@ -586,10 +586,11 @@ with col_map:
             )
             arc_layers.append(vector_layer)
 
-    # Streamlit Default Map Tiles (No map_style)
+    # Streamlit Default Map Tiles (Carto Dark Matter basemap)
     r = pdk.Deck(
         layers=[layer] + arc_layers,
         initial_view_state=view_state,
+        map_style="dark",
         tooltip={"text": "Category: {category}\nAssigned: {assigned_dept}\nRisk: {cci}"}
     )
     
@@ -734,10 +735,10 @@ if selected_ticket_str:
                 st.write(f"Station: {st_lat}, {st_lon}")
                 st.write(f"Incident: {t_lat}, {t_lon}")
                 if route_path:
-                    st.write(f"✅ Route Found! {len(route_path['coordinates'])} points.")
-                    st.write(f"First Point: {route_path['coordinates'][0]}")
+                    st.write(f"✅ Route Found! {len(route_path['geometry']['coordinates'])} points.")
+                    st.write(f"First Point: {route_path['geometry']['coordinates'][0]}")
                 else:
-                    st.error("❌ Mapbox returned NO route. Check coordinates above.")
+                    st.error("❌ Google Maps returned NO route. Check coordinates above.")
             
             if route_path:
                 # --- 1. INITIALIZE THE LAYERS LIST (CRITICAL FIX) ---
@@ -746,12 +747,14 @@ if selected_ticket_str:
                 # --- 2. CREATE THE PATH LAYER (The Route Line) ---
                 layer_path = pdk.Layer(
                     "PathLayer",
-                    data=[{"path": route_path["coordinates"], "color": [0, 255, 255]}], # NEON CYAN (High Contrast)
+                    data=[{
+                        "path": route_path["geometry"]["coordinates"], 
+                        "color": [255, 50, 50, 255] # Emergency Red
+                    }],
                     get_path="path",
                     get_color="color",
-                    width_scale=1,
-                    width_min_pixels=6,
-                    pickable=True
+                    width_scale=20,
+                    width_min_pixels=5,
                 )
                 layers.append(layer_path) # Safe to append now
                 
@@ -783,10 +786,14 @@ if selected_ticket_str:
                 st.pydeck_chart(pdk.Deck(
                     layers=layers,  # Pass the list we just built
                     initial_view_state=view_state,
+                    map_style="dark",
                     tooltip={"text": "{name}"}
                 ))
                 
-                st.success(f"🚑 Unit dispatched from **{station['name']}** (Fastest Route Calculated)")
+                st.success(f"Dispatched from: {station['name']}")
+                col1, col2 = st.columns(2)
+                col1.metric("Live ETA", route_path["duration_text"])
+                col2.metric("Distance", route_path["distance_text"])
                 
             else:
                 st.warning("⚠️ Route calculation unavailable. Showing static location.")
