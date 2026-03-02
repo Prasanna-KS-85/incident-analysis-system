@@ -728,91 +728,100 @@ if selected_ticket_str:
         if incident_lat and incident_lon:
             t_lat = incident_lat
             t_lon = incident_lon
-            station = route_engine.find_nearest_station(t_lat, t_lon, ticket_cat)
-            
-            # EXTRACT COORDINATES SAFELY
-            # Assuming station['coords'] is [Lon, Lat] (GeoJSON standard) as per route_engine.py
-            # But wait! route_engine.py returns 'lat' and 'lon' keys in the dict, NOT 'coords'.
-            # Let's check how find_nearest_station returns data.
-            # It returns: {'name':..., 'lat':..., 'lon':..., 'distance_km':...}
-            st_lat = station['lat']
-            st_lon = station['lon']
-
-            # Ensure we pass (LAT, LON) to the engine
-            # ERROR WAS HERE: We previously swapped these!
-            route_path = route_engine.get_route_geometry(
-                st_lat, st_lon,  # Start: Station (Latitude First!)
-                t_lat, t_lon     # End: Incident
+            # Pass both category and raw text for smarter routing
+            station = route_engine.find_nearest_station(
+                incident_lat, 
+                incident_lon, 
+                ticket_data.get('category', ''), 
+                ticket_data.get('original_text', '')
             )
             
-            # VISUAL DEBUGGER (Show us the data!)
-            with st.expander("🛠️ Debug: Route Telemetry"):
-                st.write(f"Station: {st_lat}, {st_lon}")
-                st.write(f"Incident: {t_lat}, {t_lon}")
+            if station:
+                # EXTRACT COORDINATES SAFELY
+                # Assuming station['coords'] is [Lon, Lat] (GeoJSON standard) as per route_engine.py
+                # But wait! route_engine.py returns 'lat' and 'lon' keys in the dict, NOT 'coords'.
+                # Let's check how find_nearest_station returns data.
+                # It returns: {'name':..., 'lat':..., 'lon':..., 'distance_km':...}
+                st_lat = station['lat']
+                st_lon = station['lon']
+    
+                # Ensure we pass (LAT, LON) to the engine
+                # ERROR WAS HERE: We previously swapped these!
+                route_path = route_engine.get_route_geometry(
+                    st_lat, st_lon,  # Start: Station (Latitude First!)
+                    t_lat, t_lon     # End: Incident
+                )
+                
+                # VISUAL DEBUGGER (Show us the data!)
+                with st.expander("🛠️ Debug: Route Telemetry"):
+                    st.write(f"Station: {st_lat}, {st_lon}")
+                    st.write(f"Incident: {t_lat}, {t_lon}")
+                    if route_path:
+                        st.write(f"✅ Route Found! {len(route_path['geometry']['coordinates'])} points.")
+                        st.write(f"First Point: {route_path['geometry']['coordinates'][0]}")
+                    else:
+                        st.error("❌ Google Maps returned NO route. Check coordinates above.")
+                
                 if route_path:
-                    st.write(f"✅ Route Found! {len(route_path['geometry']['coordinates'])} points.")
-                    st.write(f"First Point: {route_path['geometry']['coordinates'][0]}")
+                    # --- 1. INITIALIZE THE LAYERS LIST (CRITICAL FIX) ---
+                    layers = [] 
+    
+                    # --- 2. CREATE THE PATH LAYER (The Route Line) ---
+                    layer_path = pdk.Layer(
+                        "PathLayer",
+                        data=[{
+                            "path": route_path["geometry"]["coordinates"], 
+                            "color": [255, 50, 50, 255] # Emergency Red
+                        }],
+                        get_path="path",
+                        get_color="color",
+                        width_scale=20,
+                        width_min_pixels=5,
+                    )
+                    layers.append(layer_path) # Safe to append now
+                    
+                    # --- 3. CREATE THE ICONS LAYER (Start/End Points) ---
+                    icon_data = [
+                        {"position": [station['lon'], station['lat']], "color": [0, 255, 0], "name": f"STATION: {station['name']}"},
+                        {"position": [t_lon, t_lat], "color": [255, 0, 0], "name": "INCIDENT SITE"}
+                    ]
+                    
+                    layer_points = pdk.Layer(
+                        "ScatterplotLayer",
+                        data=icon_data,
+                        get_position="position",
+                        get_fill_color="color",
+                        get_radius=120,
+                        pickable=True
+                    )
+                    layers.append(layer_points)
+                    
+                    # --- 4. RENDER THE CHART ---
+                    # 3D View State
+                    view_state = pdk.ViewState(
+                        latitude=t_lat,
+                        longitude=t_lon,
+                        zoom=13,
+                        pitch=50 # Cool 3D angle
+                    )
+                    
+                    st.pydeck_chart(pdk.Deck(
+                        layers=layers,  # Pass the list we just built
+                        initial_view_state=view_state,
+                        map_style="dark",
+                        tooltip={"text": "{name}"}
+                    ))
+                    
+                    st.success(f"Dispatched from: {station['name']}")
+                    col1, col2 = st.columns(2)
+                    col1.metric("Live ETA", route_path["duration_text"])
+                    col2.metric("Distance", route_path["distance_text"])
+                    
                 else:
-                    st.error("❌ Google Maps returned NO route. Check coordinates above.")
-            
-            if route_path:
-                # --- 1. INITIALIZE THE LAYERS LIST (CRITICAL FIX) ---
-                layers = [] 
-
-                # --- 2. CREATE THE PATH LAYER (The Route Line) ---
-                layer_path = pdk.Layer(
-                    "PathLayer",
-                    data=[{
-                        "path": route_path["geometry"]["coordinates"], 
-                        "color": [255, 50, 50, 255] # Emergency Red
-                    }],
-                    get_path="path",
-                    get_color="color",
-                    width_scale=20,
-                    width_min_pixels=5,
-                )
-                layers.append(layer_path) # Safe to append now
-                
-                # --- 3. CREATE THE ICONS LAYER (Start/End Points) ---
-                icon_data = [
-                    {"position": [station['lon'], station['lat']], "color": [0, 255, 0], "name": f"STATION: {station['name']}"},
-                    {"position": [t_lon, t_lat], "color": [255, 0, 0], "name": "INCIDENT SITE"}
-                ]
-                
-                layer_points = pdk.Layer(
-                    "ScatterplotLayer",
-                    data=icon_data,
-                    get_position="position",
-                    get_fill_color="color",
-                    get_radius=120,
-                    pickable=True
-                )
-                layers.append(layer_points)
-                
-                # --- 4. RENDER THE CHART ---
-                # 3D View State
-                view_state = pdk.ViewState(
-                    latitude=t_lat,
-                    longitude=t_lon,
-                    zoom=13,
-                    pitch=50 # Cool 3D angle
-                )
-                
-                st.pydeck_chart(pdk.Deck(
-                    layers=layers,  # Pass the list we just built
-                    initial_view_state=view_state,
-                    map_style="dark",
-                    tooltip={"text": "{name}"}
-                ))
-                
-                st.success(f"Dispatched from: {station['name']}")
-                col1, col2 = st.columns(2)
-                col1.metric("Live ETA", route_path["duration_text"])
-                col2.metric("Distance", route_path["distance_text"])
-                
+                    st.warning("⚠️ Route calculation unavailable. Showing static location.")
+                    st.map(pd.DataFrame({'lat': [t_lat], 'lon': [t_lon]}))
             else:
-                st.warning("⚠️ Route calculation unavailable. Showing static location.")
-                st.map(pd.DataFrame({'lat': [t_lat], 'lon': [t_lon]}))
+                st.warning("⚠️ Dispatch Engine Offline: Unable to locate a nearby facility or missing API credentials.")
         else:
              st.warning("⚠️ No GPS Coordinates available for this ticket.")
 

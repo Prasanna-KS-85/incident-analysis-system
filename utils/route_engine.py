@@ -1,109 +1,102 @@
 import streamlit as st
-import requests
+import googlemaps
+import polyline
 import math
 
-# --- 1. HARDCODED EMERGENCY STATIONS (Vellore, TN) ---
-# In a real app, this would come from a database.
-EMERGENCY_STATIONS = {
-    "Fire": [
-        {"name": "Vellore Central Fire Station", "lat": 12.9165, "lon": 79.1325}, 
-        {"name": "Katpadi Fire & Rescue", "lat": 12.9680, "lon": 79.1450}
-    ],
-    "Medical": [
-        {"name": "Govt. Vellore Medical College Hospital (Adukkamparai)", "lat": 12.8750, "lon": 79.1150},
-        {"name": "Christian Medical College (CMC)", "lat": 12.9245, "lon": 79.1350}
-    ],
-    "Civil": [
-        {"name": "Vellore City Police HQ", "lat": 12.9200, "lon": 79.1300},
-        {"name": "Collectorate Office", "lat": 12.9300, "lon": 79.1400}
-    ]
-}
-
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Calculates the great-circle distance between two points on the Earth surface.
-    """
-    R = 6371  # Earth radius in kilometers
-    d_lat = math.radians(lat2 - lat1)
-    d_lon = math.radians(lon2 - lon1)
-    a = (math.sin(d_lat / 2) * math.sin(d_lat / 2) +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-         math.sin(d_lon / 2) * math.sin(d_lon / 2))
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-def find_nearest_station(incident_lat, incident_lon, category):
-    """
-    Finds the nearest emergency station for a given incident type.
-    
-    Args:
-        incident_lat (float): Latitude of incident.
-        incident_lon (float): Longitude of incident.
-        category (str): One of 'Fire', 'Medical', 'Civil'.
-        
-    Returns:
-        dict: Closest station object with 'name', 'lat', 'lon', and 'distance_km'.
-    """
-    if category not in EMERGENCY_STATIONS:
-        # Fallback to Civil if category unknown
-        category = "Civil"
-        
-    stations = EMERGENCY_STATIONS[category]
-    nearest = None
-    min_dist = float('inf')
-    
-    for station in stations:
-        dist = haversine_distance(incident_lat, incident_lon, station['lat'], station['lon'])
-        if dist < min_dist:
-            min_dist = dist
-            nearest = station.copy()
-            nearest['distance_km'] = round(dist, 2)
-            
-    return nearest
-
-def get_route_geometry(start_lat, start_lon, end_lat, end_lon):
-    """
-    Fetches driving route geometry from Mapbox Directions API.
-    
-    Args:
-        start_lat, start_lon: Starting point (Incident).
-        end_lat, end_lon: Destination (Emergency Station).
-        
-    Returns:
-        dict: GeoJSON geometry of the route or None if failed.
-    """
+def get_gmaps_client():
+    """Initializes and returns the Google Maps client using Streamlit secrets."""
     try:
-        # 1. Securely fetch token
-        mapbox_token = st.secrets["general"]["mapbox_token"]
+        api_key = st.secrets["general"]["google_maps_api_key"]
+        return googlemaps.Client(key=api_key)
     except KeyError:
-        st.error("🚨 Mapbox Token Missing! specific 'mapbox_token' in .streamlit/secrets.toml")
-        return None
-    except FileNotFoundError:
-        st.error("🚨 Secrets File Missing! Create .streamlit/secrets.toml")
+        st.error("Google Maps API key not found in secrets.toml")
         return None
 
-    # 2. Construct API URL
-    # Mapbox uses Longitude,Latitude format
-    coords = f"{start_lon},{start_lat};{end_lon},{end_lat}"
-    url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords}"
+def get_facility_type(category, grievance_text=""):
+    """Maps the grievance category and text to a Google Places API facility type."""
+    cat = str(category).lower()
+    text = str(grievance_text).lower()
     
-    params = {
-        "geometries": "geojson",
-        "overview": "full",
-        "access_token": mapbox_token
-    }
-    
-    # 3. Request
-    try:
-        response = requests.get(url, params=params)
-        data = response.json()
+    # 1. Medical Emergencies
+    if "medical" in cat or "health" in cat or any(w in text for w in ["medical", "injury", "ambulance", "accident", "heart"]):
+        return "hospital"
         
-        if response.status_code == 200 and "routes" in data and len(data["routes"]) > 0:
-            return data["routes"][0]["geometry"]
-        else:
-            print(f"Routing Error: {data.get('message', 'Unknown Error')}")
+    # 2. Fire Emergencies
+    if "fire" in cat or any(w in text for w in ["fire", "smoke", "burn"]):
+        return "fire_station"
+        
+    # 3. Police / Law Enforcement
+    if "crime" in cat or "safety" in cat or "security" in cat or any(w in text for w in ["police", "theft", "assault", "fight"]):
+        return "police"
+        
+    # 4. Civil / Infrastructure (Water, Sanitation, Roads, Noise, Environment)
+    # Defaults to municipal offices for city management issues
+    return "local_government_office"
+
+def find_nearest_station(incident_lat, incident_lon, category, grievance_text=""):
+    """Dynamically finds the nearest appropriate facility using Google Places API."""
+    gmaps = get_gmaps_client()
+    if not gmaps:
+        return None
+
+    facility_type = get_facility_type(category, grievance_text)
+    try:
+        # Search for the nearest facility within a 10km radius
+        places_result = gmaps.places_nearby(
+            location=(incident_lat, incident_lon),
+            radius=10000,
+            type=facility_type
+        )
+
+        if not places_result.get('results'):
             return None
             
+        # Get the closest result
+        nearest = places_result['results'][0]
+        return {
+            "name": nearest['name'],
+            "lat": nearest['geometry']['location']['lat'],
+            "lon": nearest['geometry']['location']['lng'],
+            "type": facility_type
+        }
     except Exception as e:
-        print(f"API Request Failed: {e}")
+        st.error(f"Error fetching nearby places: {e}")
+        return None
+        
+def get_route_geometry(start_lat, start_lon, end_lat, end_lon):
+    """Fetches the route from Google Directions API and decodes the polyline for PyDeck."""
+    gmaps = get_gmaps_client()
+    if not gmaps:
+        return None
+
+    try:
+        directions_result = gmaps.directions(
+            (start_lat, start_lon),
+            (end_lat, end_lon),
+            mode="driving",
+            departure_time="now" # Takes current traffic into account
+        )
+        
+        if not directions_result:
+            return None
+            
+        # Extract the encoded polyline
+        encoded_polyline = directions_result[0]['overview_polyline']['points']
+        
+        # Decode the polyline into a list of (lat, lon) tuples
+        decoded_points = polyline.decode(encoded_polyline)
+        
+        # PyDeck requires [lon, lat] format, so we must reverse the tuples
+        pydeck_path = [[lon, lat] for lat, lon in decoded_points]
+        
+        # Return in a format ready for PyDeck's PathLayer
+        return {
+            "geometry": {
+                "coordinates": pydeck_path
+            },
+            "distance_text": directions_result[0]['legs'][0]['distance']['text'],
+            "duration_text": directions_result[0]['legs'][0]['duration']['text']
+        }
+    except Exception as e:
+        st.error(f"Error calculating route: {e}")
         return None
