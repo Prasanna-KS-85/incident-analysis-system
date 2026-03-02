@@ -708,11 +708,26 @@ if selected_ticket_str:
         # 1. FIND NEAREST STATION
         # Uses the ticket's category (Fire/Medical) to pick the right station type
         ticket_cat = ticket_data.get('category', 'General') 
-        # Ensure lat/lon are floats
-        t_lat = float(ticket_data.get('lat', 0.0))
-        t_lon = float(ticket_data.get('lon', 0.0))
+        # Robust GPS extraction for the selected ticket
+        incident_lat = None
+        incident_lon = None
         
-        if t_lat != 0 and t_lon != 0:
+        # Try flat keys first
+        if 'latitude' in ticket_data and not pd.isna(ticket_data['latitude']):
+            incident_lat = float(ticket_data['latitude'])
+            incident_lon = float(ticket_data['longitude'])
+        elif 'lat' in ticket_data and not pd.isna(ticket_data['lat']):
+            incident_lat = float(ticket_data['lat'])
+            incident_lon = float(ticket_data['lon'])
+            
+        # Try nested location dict (common in manual portal submissions)
+        elif 'location' in ticket_data and isinstance(ticket_data['location'], dict):
+            incident_lat = float(ticket_data['location'].get('latitude', ticket_data['location'].get('lat')))
+            incident_lon = float(ticket_data['location'].get('longitude', ticket_data['location'].get('lon')))
+        
+        if incident_lat and incident_lon:
+            t_lat = incident_lat
+            t_lon = incident_lon
             station = route_engine.find_nearest_station(t_lat, t_lon, ticket_cat)
             
             # EXTRACT COORDINATES SAFELY
