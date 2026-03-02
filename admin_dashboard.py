@@ -708,22 +708,22 @@ if selected_ticket_str:
         # 1. FIND NEAREST STATION
         # Uses the ticket's category (Fire/Medical) to pick the right station type
         ticket_cat = ticket_data.get('category', 'General') 
-        # Robust GPS extraction for the selected ticket
+        # Extract GPS coordinates based on the MongoDB schema
         incident_lat = None
         incident_lon = None
         
-        # Try flat keys first
-        if 'latitude' in ticket_data and not pd.isna(ticket_data['latitude']):
-            incident_lat = float(ticket_data['latitude'])
-            incident_lon = float(ticket_data['longitude'])
-        elif 'lat' in ticket_data and not pd.isna(ticket_data['lat']):
-            incident_lat = float(ticket_data['lat'])
-            incident_lon = float(ticket_data['lon'])
+        # Check for the nested 'gps' dictionary first (standard submission)
+        if 'gps' in ticket_data and isinstance(ticket_data['gps'], dict):
+            incident_lat = ticket_data['gps'].get('lat')
+            incident_lon = ticket_data['gps'].get('lon')
             
-        # Try nested location dict (common in manual portal submissions)
-        elif 'location' in ticket_data and isinstance(ticket_data['location'], dict):
-            incident_lat = float(ticket_data['location'].get('latitude', ticket_data['location'].get('lat')))
-            incident_lon = float(ticket_data['location'].get('longitude', ticket_data['location'].get('lon')))
+        # Fallback for legacy or flat data structures
+        elif 'lat' in ticket_data and 'lon' in ticket_data:
+            incident_lat = ticket_data.get('lat')
+            incident_lon = ticket_data.get('lon')
+        elif 'latitude' in ticket_data and 'longitude' in ticket_data:
+            incident_lat = ticket_data.get('latitude')
+            incident_lon = ticket_data.get('longitude')
         
         if incident_lat and incident_lon:
             t_lat = incident_lat
