@@ -697,6 +697,15 @@ if selected_ticket_str:
         </div>
         """, unsafe_allow_html=True)
 
+        # Display English Transcript if applicable
+        translated = ticket_data.get('translated_text', '')
+        original = ticket_data.get('original_text', '')
+        
+        if translated and translated != original:
+            st.markdown("---")
+            st.markdown("#### 🌎 English Transcript:")
+            st.success(f"{translated}")
+
         # Optional: Show Image Thumbnail if exists
         if ticket_data.get('has_image'):
             st.caption("📸 Visual Evidence is attached to this report (See below).")
@@ -708,32 +717,29 @@ if selected_ticket_str:
         # 1. FIND NEAREST STATION
         # Uses the ticket's category (Fire/Medical) to pick the right station type
         ticket_cat = ticket_data.get('category', 'General') 
-        # Extract GPS coordinates based on the MongoDB schema
+        # 1. Extract GPS (Prioritize flat batch keys over nested portal keys)
         incident_lat = None
         incident_lon = None
-        
-        # Check for the nested 'gps' dictionary first (standard submission)
-        if 'gps' in ticket_data and isinstance(ticket_data['gps'], dict):
+        if 'lat' in ticket_data and 'lon' in ticket_data and ticket_data['lat'] is not None:
+            incident_lat = float(ticket_data['lat'])
+            incident_lon = float(ticket_data['lon'])
+        elif 'latitude' in ticket_data and 'longitude' in ticket_data:
+            incident_lat = float(ticket_data['latitude'])
+            incident_lon = float(ticket_data['longitude'])
+        elif 'gps' in ticket_data and isinstance(ticket_data['gps'], dict):
             incident_lat = ticket_data['gps'].get('lat')
             incident_lon = ticket_data['gps'].get('lon')
-            
-        # Fallback for legacy or flat data structures
-        elif 'lat' in ticket_data and 'lon' in ticket_data:
-            incident_lat = ticket_data.get('lat')
-            incident_lon = ticket_data.get('lon')
-        elif 'latitude' in ticket_data and 'longitude' in ticket_data:
-            incident_lat = ticket_data.get('latitude')
-            incident_lon = ticket_data.get('longitude')
         
         if incident_lat and incident_lon:
             t_lat = incident_lat
             t_lon = incident_lon
-            # Pass both category and raw text for smarter routing
+            # 2. Use translated text for accurate keyword routing
+            text_to_analyze = ticket_data.get('translated_text', ticket_data.get('original_text', ''))
             station = route_engine.find_nearest_station(
                 incident_lat, 
                 incident_lon, 
                 ticket_data.get('category', ''), 
-                ticket_data.get('original_text', '')
+                text_to_analyze
             )
             
             if station:
