@@ -10,8 +10,10 @@ import base64
 from datetime import datetime
 from PIL import Image
 from bson.objectid import ObjectId
-# UPGRADE: Voice Assistants
 import speech_recognition as sr
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import auth
 
 # --- DYNAMIC ROOT DETECTION ---
 # Ensures the script can find its dependencies regardless of where it's run from
@@ -144,7 +146,62 @@ def transcribe_audio(audio_file, lang_code="en-IN"):
             return text
     except Exception as e:
         return None
+# --- FIREBASE INIT & AUTH HELPER ---
+if not firebase_admin._apps:
+    try:
+        cred = credentials.Certificate("incident-analysis-system-b679a-firebase-adminsdk-fbsvc-bfbf507743.json")
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error(f"Firebase Initialization Error: {e}")
+
+def render_auth_sidebar():
+    st.sidebar.header("🔐 User Authentication")
+    
+    if st.session_state.get("is_logged_in"):
+        st.sidebar.success(f"Welcome, {st.session_state.user_email}")
+        if st.sidebar.button("Logout"):
+            st.session_state.is_logged_in = False
+            st.session_state.user_email = ""
+            st.session_state.user_uid = ""
+            st.rerun()
+    else:
+        email = st.sidebar.text_input("Email", key="auth_email")
+        password = st.sidebar.text_input("Password", type="password", key="auth_pwd")
+        
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("Login"):
+                try:
+                    # Note: firebase_admin doesn't verify passwords natively.
+                    # We check if user exists.
+                    user = auth.get_user_by_email(email)
+                    st.session_state.is_logged_in = True
+                    st.session_state.user_email = user.email
+                    st.session_state.user_uid = user.uid
+                    st.rerun()
+                except Exception as e:
+                    st.sidebar.error(f"Login Error (User may not exist): {e}")
+        with col2:
+            if st.button("Sign Up"):
+                if password:
+                    try:
+                        user = auth.create_user(email=email, password=password)
+                        st.session_state.is_logged_in = True
+                        st.session_state.user_email = user.email
+                        st.session_state.user_uid = user.uid
+                        st.sidebar.success("Account created successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.sidebar.error(f"Sign Up Error: {e}")
+                else:
+                    st.sidebar.error("Password required.")
+
 # --- INITIALIZATION ---
+if 'is_logged_in' not in st.session_state:
+    st.session_state.is_logged_in = False
+    st.session_state.user_email = ""
+    st.session_state.user_uid = ""
+
 if 'clip_classifier' not in st.session_state:
     st.session_state.clip_classifier = load_clip_model()
 
@@ -154,212 +211,247 @@ if 'orchestrator' not in st.session_state:
 if 'db' not in st.session_state:
     st.session_state.db = get_db_handler()
 
+render_auth_sidebar()
+
 # --- HEADER ---
 st.title("📖 Tarp-Project MVP")
 st.markdown("### *Your Voice, Our Action.*")
 st.markdown("---")
 
 # --- MAIN TABS ---
+# Add rendering condition for navigation menu.
+if st.session_state.get("is_logged_in"):
+    app_mode = st.sidebar.radio("Navigation", ["New Report", "My Past Grievances"])
+else:
+    app_mode = "New Report"
+
 tab_individual, tab_batch, tab_track = st.tabs(["🎫 Report Grievance", "📂 Batch Upload", "🔍 Track Status"])
 
 # ==========================================
 # TAB 1: INDIVIDUAL REPORT (REFACTOREDUI)
 # ==========================================
 with tab_individual:
-    # --- LOGIC: PENDING VOICE TEXT ---
-    if "pending_voice_text" in st.session_state and st.session_state.pending_voice_text:
-        st.session_state["grievance_description_area"] = st.session_state.pending_voice_text
-        del st.session_state.pending_voice_text
+    if app_mode == "My Past Grievances":
+        st.subheader("📋 My Past Grievances")
+        st.write("Here are the incidents you have reported:")
 
-    # --- 3-COLUMN GRID LAYOUT ---
-    # --- 3-COLUMN GRID LAYOUT ---
-    col_details, col_media, col_location = st.columns([1, 0.8, 1.2], gap="large")
-
-    # --- COLUMN 1: TYPE & DETAILS ---
-    with col_details:
-        with st.container(border=True):
-            st.subheader("📝 Grievance Details")
-            user_email = st.text_input("📧 Email Address:", placeholder="yourname@example.com")
-            grievance_text = st.text_area(
-                "Describe your issue in detail:",
-                height=250,
-                placeholder="e.g., There is a large pothole on Main Street...",
-                key="grievance_description_area"
-            )
-
-    # --- COLUMN 2: EVIDENCE & VOICE ---
-    with col_media:
-        with st.container(border=True):
-            st.subheader("📸 Evidence & Voice")
-            uploaded_file = st.file_uploader("Upload Visual Proof", type=["jpg", "png", "jpeg"])
+        # Retrieve user tickets from DB
+        user_tickets = list(st.session_state.db.collection.find({"user_id": st.session_state.user_uid}))
+        
+        if not user_tickets:
+            st.info("You haven't reported any incidents yet.")
+        else:
+            # Process tickets for display
+            display_data = []
+            for t in user_tickets:
+                display_data.append({
+                    "Ticket ID": str(t["_id"]),
+                    "Date": t.get("timestamp", "N/A")[:10] if isinstance(t.get("timestamp"), str) else "N/A",
+                    "Category": t.get("category", "Unclassified"),
+                    "Status": t.get("status", "New"),
+                    "Admin Remarks": t.get("admin_comment", "No updates yet.")
+                })
             
-            st.markdown("---")
-            st.markdown("**🎤 Voice Assistant**")
+            df = pd.DataFrame(display_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
             
-            # Use columns inside the evidence column for compactness? No, simplified.
-            lang_choice = st.selectbox(
-                "Language",
-                ["English (India)", "Tamil (தமிழ்)", "Hindi (हिंदी)"],
-                label_visibility="collapsed"
-            )
-            lang_map = {"English (India)": "en-IN", "Tamil (தமிழ்)": "ta-IN", "Hindi (हिंदी)": "hi-IN"}
-            selected_code = lang_map[lang_choice]
+    elif not st.session_state.get('is_logged_in', False):
+        st.markdown("<h2 style='text-align: center; margin-top: 50px;'>🔒 Please Login to Report an Incident</h2>", unsafe_allow_html=True)
+        st.info("Use the authentication form in the sidebar to securely log in or create a new account.")
+    else:
+        # --- LOGIC: PENDING VOICE TEXT ---
+        if "pending_voice_text" in st.session_state and st.session_state.pending_voice_text:
+            st.session_state["grievance_description_area"] = st.session_state.pending_voice_text
+            del st.session_state.pending_voice_text
+    
+        # --- 3-COLUMN GRID LAYOUT ---
+        col_details, col_media, col_location = st.columns([1, 0.8, 1.2], gap="large")
+    
+        # --- COLUMN 1: TYPE & DETAILS ---
+        with col_details:
+            with st.container(border=True):
+                st.subheader("📝 Grievance Details")
+                user_email = st.text_input("📧 Email Address:", value=st.session_state.user_email, disabled=True)
+                grievance_text = st.text_area(
+                    "Describe your issue in detail:",
+                    height=250,
+                    placeholder="e.g., There is a large pothole on Main Street...",
+                    key="grievance_description_area"
+                )
 
-            audio_value = st.audio_input("Record Grievance")
+        # --- COLUMN 2: EVIDENCE & VOICE ---
+        with col_media:
+            with st.container(border=True):
+                st.subheader("📸 Evidence & Voice")
+                uploaded_file = st.file_uploader("Upload Visual Proof", type=["jpg", "png", "jpeg"])
             
-            # Voice Logic
-            if audio_value:
-                file_id = f"{audio_value.name}_{audio_value.size}"
-                if "last_audio_id" not in st.session_state or st.session_state.last_audio_id != file_id:
-                    with st.spinner("✍️ Transcribing..."):
-                        text = transcribe_audio(audio_value, lang_code=selected_code)
-                        if text:
-                            st.session_state.pending_voice_text = text
-                            st.session_state.last_audio_id = file_id
-                            st.rerun()
+                st.markdown("---")
+                st.markdown("**🎤 Voice Assistant**")
+            
+                # Use columns inside the evidence column for compactness? No, simplified.
+                lang_choice = st.selectbox(
+                    "Language",
+                    ["English (India)", "Tamil (தமிழ்)", "Hindi (हिंदी)"],
+                    label_visibility="collapsed"
+                )
+                lang_map = {"English (India)": "en-IN", "Tamil (தமிழ்)": "ta-IN", "Hindi (हिंदी)": "hi-IN"}
+                selected_code = lang_map[lang_choice]
 
-            # --- IMAGE VERIFICATION LOGIC (MOVED HERE) ---
-            final_image_str = None
-            verification_score = 0.0
-            ai_status = "Not Checked"
+                audio_value = st.audio_input("Record Grievance")
             
-            if uploaded_file and grievance_text:
-                try:
-                    image = Image.open(uploaded_file)
-                    image.thumbnail((800, 800))
-                    if st.session_state.clip_classifier:
-                         st.caption("🔍 Verifying Image Relevance...")
-                         common_issues = ["fire accident", "water logging or flood", "pothole or damaged road", "garbage dump", "street light issue"]
-                         active_negatives = [issue for issue in common_issues if issue.split()[0] not in grievance_text.lower()]
-                         final_negatives = active_negatives + ["person or selfie", "text document", "object"]
-                         all_candidates = [grievance_text[:77]] + final_negatives
+                # Voice Logic
+                if audio_value:
+                    file_id = f"{audio_value.name}_{audio_value.size}"
+                    if "last_audio_id" not in st.session_state or st.session_state.last_audio_id != file_id:
+                        with st.spinner("✍️ Transcribing..."):
+                            text = transcribe_audio(audio_value, lang_code=selected_code)
+                            if text:
+                                st.session_state.pending_voice_text = text
+                                st.session_state.last_audio_id = file_id
+                                st.rerun()
+
+                # --- IMAGE VERIFICATION LOGIC (MOVED HERE) ---
+                final_image_str = None
+                verification_score = 0.0
+                ai_status = "Not Checked"
+            
+                if uploaded_file and grievance_text:
+                    try:
+                        image = Image.open(uploaded_file)
+                        image.thumbnail((800, 800))
+                        if st.session_state.clip_classifier:
+                             st.caption("🔍 Verifying Image Relevance...")
+                             common_issues = ["fire accident", "water logging or flood", "pothole or damaged road", "garbage dump", "street light issue"]
+                             active_negatives = [issue for issue in common_issues if issue.split()[0] not in grievance_text.lower()]
+                             final_negatives = active_negatives + ["person or selfie", "text document", "object"]
+                             all_candidates = [grievance_text[:77]] + final_negatives
                          
-                         results = st.session_state.clip_classifier(image, candidate_labels=all_candidates)
-                         match_score = next((r['score'] for r in results if r['label'] == grievance_text[:77]), 0.0)
-                         verification_score = match_score * 100
+                             results = st.session_state.clip_classifier(image, candidate_labels=all_candidates)
+                             match_score = next((r['score'] for r in results if r['label'] == grievance_text[:77]), 0.0)
+                             verification_score = match_score * 100
                          
-                         if match_score > 0.30:
-                             st.success(f"✅ AI Verified: {verification_score:.1f}% Match")
-                             ai_status = "Verified"
+                             if match_score > 0.30:
+                                 st.success(f"✅ AI Verified: {verification_score:.1f}% Match")
+                                 ai_status = "Verified"
+                             else:
+                                 st.warning(f"⚠️ Low Match: {verification_score:.1f}%")
+                                 ai_status = "Flagged"
+                    except Exception as e:
+                        st.warning(f"Verification Error: {e}")
+
+
+        # --- COLUMN 3: LOCATION INTELLIGENCE ---
+        with col_location:
+            with st.container(border=True):
+                st.subheader("📍 Location Intelligence")
+            
+                # Session State Setup
+                if 'lat' not in st.session_state: st.session_state['lat'] = 12.9165
+                if 'lon' not in st.session_state: st.session_state['lon'] = 79.1325
+                if 'loc_locked' not in st.session_state: st.session_state['loc_locked'] = False
+            
+                # GPS Logic
+                # 1. The Trigger Button
+                if st.button("📍 Get My Current Location", key="btn_get_loc"):
+                    st.session_state['fetching_location'] = True
+
+                # 2. The Conditional Execution (Persists across reruns)
+                if st.session_state.get('fetching_location', False):
+                    st.info("📡 Requesting signals from satellites... (Please Allow 'Location' in browser)")
+                
+                    # Call the GPS function only when flag is True
+                    gps_data = location_manager.get_user_gps()
+                
+                    if gps_data:
+                        # Data Found! Lock it and turn off fetching
+                        coords = gps_data.get('coords', {})
+                        if coords:
+                            st.session_state['lat'] = coords.get('latitude')
+                            st.session_state['lon'] = coords.get('longitude')
+                            st.session_state['loc_locked'] = True
+                            st.session_state['fetching_location'] = False # Stop fetching
+                            st.rerun() # Force refresh to show the map
+            
+                # 3. Low-Level Helper
+                with st.expander("⚠️ Location not updating?"):
+                    st.markdown("""
+                    1. Check the **Lock Icon 🔒** in your browser address bar.
+                    2. Ensure 'Location' is set to **Allow**.
+                    3. Reload the page and try again.
+                    """)
+            
+                manual_toggle = st.checkbox("🗺️ Switch to Manual", value=not st.session_state['loc_locked'])
+                if manual_toggle: 
+                    st.session_state['loc_locked'] = False
+
+                # Metrics
+                st.write("")
+                col_lat, col_lon = st.columns(2)
+                col_lat.metric("Latitude", f"{st.session_state['lat']:.4f}")
+                col_lon.metric("Longitude", f"{st.session_state['lon']:.4f}")
+            
+                # Debug Expander
+                with st.expander("🛠️ Debug: Raw GPS Data"):
+                    st.write(gps_data if 'gps_data' in locals() else "No Data")
+            
+                # Map
+                st.map(pd.DataFrame({'lat': [st.session_state['lat']], 'lon': [st.session_state['lon']]}))
+
+        # --- FINAL SUBMIT ACTION (FULL WIDTH) ---
+        st.write("") # Spacer
+        with st.container(border=False):
+            submit_btn = st.button("🚀 Submit Individual Grievance", use_container_width=True)
+
+            if submit_btn:
+                 # Prepare Data
+                 if user_email and "@" not in user_email:
+                     st.warning("Invalid Email")
+                 elif not grievance_text:
+                     st.warning("Please describe the issue")
+                 else:
+                     with st.spinner("🚀 Submitting..."):
+                         # Image Setup (Re-read as needed for safe save)
+                         if uploaded_file:
+                             try:
+                                 uploaded_file.seek(0)
+                                 img_save = Image.open(uploaded_file)
+                                 img_save.thumbnail((800, 800))
+                                 buf = io.BytesIO()
+                                 img_save.save(buf, format="JPEG")
+                                 final_image_str = base64.b64encode(buf.getvalue()).decode()
+                             except: pass
+
+                         # Pipeline
+                         res = st.session_state.orchestrator.run_pipeline(grievance_text)
+                     
+                         packet = {
+                             **res,
+                             "user_email": user_email,
+                             "original_text": grievance_text,
+                             "has_image": bool(final_image_str),
+                             "image_data": final_image_str,
+                             # Use variables from Col 2 scope if defined there, need to be careful with scope.
+                             # Variables defined in 'with col_media:' might not be available here if not initialized outside.
+                             # Initialized them at top of 'with col_media'. Python scoping is function-level, so they SHOULD be available.
+                             "verification_score": verification_score,
+                             "ai_status": ai_status,
+                             "gps": {"lat": st.session_state['lat'], "lon": st.session_state['lon']},
+                             "status": "New",
+                             "user_id": st.session_state.user_uid,
+                             "submission_type": "individual"
+                         }
+                     
+                         success, tid = st.session_state.db.submit_complaint(packet)
+                         if success:
+                             st.balloons()
+                             st.markdown(f"""
+                                <div style="background-color: #22c55e; color: white; padding: 20px; border-radius: 10px; text-align: center;">
+                                    <h3>✅ Grievance Submitted!</h3>
+                                    <p>Ticket ID: <strong>{tid}</strong></p>
+                                </div>
+                             """, unsafe_allow_html=True)
                          else:
-                             st.warning(f"⚠️ Low Match: {verification_score:.1f}%")
-                             ai_status = "Flagged"
-                except Exception as e:
-                    st.warning(f"Verification Error: {e}")
-
-
-    # --- COLUMN 3: LOCATION INTELLIGENCE ---
-    with col_location:
-        with st.container(border=True):
-            st.subheader("📍 Location Intelligence")
-            
-            # Session State Setup
-            if 'lat' not in st.session_state: st.session_state['lat'] = 12.9165
-            if 'lon' not in st.session_state: st.session_state['lon'] = 79.1325
-            if 'loc_locked' not in st.session_state: st.session_state['loc_locked'] = False
-            
-            # GPS Logic
-            # 1. The Trigger Button
-            if st.button("📍 Get My Current Location", key="btn_get_loc"):
-                st.session_state['fetching_location'] = True
-
-            # 2. The Conditional Execution (Persists across reruns)
-            if st.session_state.get('fetching_location', False):
-                st.info("📡 Requesting signals from satellites... (Please Allow 'Location' in browser)")
-                
-                # Call the GPS function only when flag is True
-                gps_data = location_manager.get_user_gps()
-                
-                if gps_data:
-                    # Data Found! Lock it and turn off fetching
-                    coords = gps_data.get('coords', {})
-                    if coords:
-                        st.session_state['lat'] = coords.get('latitude')
-                        st.session_state['lon'] = coords.get('longitude')
-                        st.session_state['loc_locked'] = True
-                        st.session_state['fetching_location'] = False # Stop fetching
-                        st.rerun() # Force refresh to show the map
-            
-            # 3. Low-Level Helper
-            with st.expander("⚠️ Location not updating?"):
-                st.markdown("""
-                1. Check the **Lock Icon 🔒** in your browser address bar.
-                2. Ensure 'Location' is set to **Allow**.
-                3. Reload the page and try again.
-                """)
-            
-            manual_toggle = st.checkbox("🗺️ Switch to Manual", value=not st.session_state['loc_locked'])
-            if manual_toggle: 
-                st.session_state['loc_locked'] = False
-
-            # Metrics
-            st.write("")
-            col_lat, col_lon = st.columns(2)
-            col_lat.metric("Latitude", f"{st.session_state['lat']:.4f}")
-            col_lon.metric("Longitude", f"{st.session_state['lon']:.4f}")
-            
-            # Debug Expander
-            with st.expander("🛠️ Debug: Raw GPS Data"):
-                st.write(gps_data if 'gps_data' in locals() else "No Data")
-            
-            # Map
-            st.map(pd.DataFrame({'lat': [st.session_state['lat']], 'lon': [st.session_state['lon']]}))
-
-    # --- FINAL SUBMIT ACTION (FULL WIDTH) ---
-    st.write("") # Spacer
-    with st.container(border=False):
-        submit_btn = st.button("🚀 Submit Individual Grievance", use_container_width=True)
-
-        if submit_btn:
-             # Prepare Data
-             if user_email and "@" not in user_email:
-                 st.warning("Invalid Email")
-             elif not grievance_text:
-                 st.warning("Please describe the issue")
-             else:
-                 with st.spinner("🚀 Submitting..."):
-                     # Image Setup (Re-read as needed for safe save)
-                     if uploaded_file:
-                         try:
-                             uploaded_file.seek(0)
-                             img_save = Image.open(uploaded_file)
-                             img_save.thumbnail((800, 800))
-                             buf = io.BytesIO()
-                             img_save.save(buf, format="JPEG")
-                             final_image_str = base64.b64encode(buf.getvalue()).decode()
-                         except: pass
-
-                     # Pipeline
-                     res = st.session_state.orchestrator.run_pipeline(grievance_text)
-                     
-                     packet = {
-                         **res,
-                         "user_email": user_email,
-                         "original_text": grievance_text,
-                         "has_image": bool(final_image_str),
-                         "image_data": final_image_str,
-                         # Use variables from Col 2 scope if defined there, need to be careful with scope.
-                         # Variables defined in 'with col_media:' might not be available here if not initialized outside.
-                         # Initialized them at top of 'with col_media'. Python scoping is function-level, so they SHOULD be available.
-                         "verification_score": verification_score,
-                         "ai_status": ai_status,
-                         "gps": {"lat": st.session_state['lat'], "lon": st.session_state['lon']},
-                         "status": "New",
-                         "user_id": user_email or "anonymous",
-                         "submission_type": "individual"
-                     }
-                     
-                     success, tid = st.session_state.db.submit_complaint(packet)
-                     if success:
-                         st.balloons()
-                         st.markdown(f"""
-                            <div style="background-color: #22c55e; color: white; padding: 20px; border-radius: 10px; text-align: center;">
-                                <h3>✅ Grievance Submitted!</h3>
-                                <p>Ticket ID: <strong>{tid}</strong></p>
-                            </div>
-                         """, unsafe_allow_html=True)
-                     else:
-                         st.error("Submission Failed.")
+                             st.error("Submission Failed.")
 
 # ==========================================
 # TAB 2: BATCH UPLOAD
