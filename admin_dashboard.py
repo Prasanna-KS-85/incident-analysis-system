@@ -58,7 +58,7 @@ def send_notification_email(recipient_email, ticket_id, new_status, admin_remark
         
     try:
         msg = MIMEMultipart("alternative")
-        msg['From'] = SENDER_EMAIL
+        msg['From'] = st.secrets["general"]["email_sender"]
         msg['To'] = recipient_email
         
         # --- 3. ROBUST HEADER ENCODING ---
@@ -154,9 +154,9 @@ def send_notification_email(recipient_email, ticket_id, new_status, admin_remark
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         
-        # Strip hidden characters and spaces from credentials
-        clean_email = SENDER_EMAIL.strip().replace('\xa0', '')
-        clean_password = APP_PASSWORD.strip().replace('\xa0', '').replace(' ', '')
+        # Strip hidden characters and spaces from credentials, pull from standard streamlit secrets config
+        clean_email = st.secrets["general"]["email_sender"].strip().replace('\xa0', '')
+        clean_password = st.secrets["general"]["email_password"].strip().replace('\xa0', '').replace(' ', '')
         
         server.login(clean_email, clean_password)
         # Use send_message for better UTF-8 handling
@@ -164,8 +164,7 @@ def send_notification_email(recipient_email, ticket_id, new_status, admin_remark
         server.quit()
         return True
     except Exception as e:
-        print("❌ EMAIL FAILED WITH TRACEBACK:")
-        traceback.print_exc()
+        print(f"SMTP ERROR: {e}")
         return False
 
 # ---------------------------------------------------------
