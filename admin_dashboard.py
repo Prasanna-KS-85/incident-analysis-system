@@ -490,11 +490,11 @@ st.subheader("🌍 GEOSPATIAL HEATMAP")
 valid_geo = df[(df['lat'] > 10) & (df['lon'] > 70)].copy()
 
 if not valid_geo.empty:
-    center_lat = valid_geo['lat'].mean()
-    center_lon = valid_geo['lon'].mean()
+    map_lat = valid_geo['lat'].mean()
+    map_lon = valid_geo['lon'].mean()
 else:
     # FORCE DEFAULT TO CHENNAI
-    center_lat, center_lon = 13.0827, 80.2707
+    map_lat, map_lon = 13.0827, 80.2707
 
 col_map, col_legend = st.columns([3, 1])
 
@@ -524,8 +524,8 @@ with col_map:
     )
 
     view_state = pdk.ViewState(
-        latitude=center_lat,
-        longitude=center_lon,
+        latitude=map_lat,
+        longitude=map_lon,
         zoom=10,
         pitch=50, # 3D Perspective
         bearing=0
@@ -545,24 +545,20 @@ with col_map:
             stations = dept_config['stations']
             dept_color = dept_config['color']
             
-            # Helper to find nearest station
+            # Helper to find actual physical station intelligently
             def get_nearest_hub_coords(row):
                 inc_lat = row['lat']
                 inc_lon = row['lon']
+                cat = row.get('category', 'Unclassified')
+                text = row.get('translated_text', row.get('original_text', row.get('text', '')))
                 
-                nearest = None
-                min_dist = float('inf')
+                station = route_engine.find_nearest_station(inc_lat, inc_lon, cat, text)
                 
-                for stn in stations:
-                    # Simple Euclidean distance squared
-                    dist = (stn['lat'] - inc_lat)**2 + (stn['lon'] - inc_lon)**2
-                    if dist < min_dist:
-                        min_dist = dist
-                        nearest = stn
+                if station:
+                    return [station['lon'], station['lat']]
                 
-                if nearest:
-                    return [nearest['lon'], nearest['lat']]
-                return [0, 0]
+                # If API fails or no station found, arc length is 0 (source == target)
+                return [inc_lon, inc_lat]
 
             # Create Arc Dataframe
             arc_data = valid_geo.copy()
@@ -592,8 +588,7 @@ with col_map:
         map_style="dark",
         tooltip={"text": "Category: {category}\nAssigned: {assigned_dept}\nRisk: {cci}"}
     )
-    
-    st.pydeck_chart(r)
+    st.pydeck_chart(r, key="dynamic_map_v1")
 
 with col_legend:
     st.markdown("#### THREAT LEGEND")
