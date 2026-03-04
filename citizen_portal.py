@@ -35,6 +35,8 @@ try:
     from transformers import pipeline
     # IMPORT LOCATION MANAGER
     from utils import location_manager
+    # IMPORT CCED CLUSTER ENGINE
+    from utils import cluster_engine
 except ImportError as e:
     st.error(f"Configuration Error: {e}")
     st.stop()
@@ -450,6 +452,13 @@ with tab_individual:
                                     <p>Ticket ID: <strong>{tid}</strong></p>
                                 </div>
                              """, unsafe_allow_html=True)
+
+                             # --- TRIGGER CCED CLUSTER SCAN ---
+                             try:
+                                 cluster_engine.scan_and_update(st.session_state.db)
+                             except Exception as e:
+                                 print(f"CCED Scan Error: {e}")
+
                          else:
                              st.error("Submission Failed.")
 

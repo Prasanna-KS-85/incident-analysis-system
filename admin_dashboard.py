@@ -482,6 +482,53 @@ c4.metric("MEAN RISK IDX", f"{df['cci'].mean():.1f}/10")
 
 st.markdown("---")
 
+# --- CCED: SYSTEMIC INCIDENT ALERTS ---
+if db.is_connected:
+    _active_clusters = list(db.db["clusters"].find({"status": "Active"}))
+    if _active_clusters:
+        st.markdown("## 🚨 SYSTEMIC INCIDENT ALERTS")
+        st.caption("Clusters detected by the CCED Spatial-Temporal Engine")
+        for _cl in _active_clusters:
+            _label = _cl.get("systemic_event_label", "Unknown Event")
+            _cci   = _cl.get("cluster_cci", 0.0)
+            _count = len(_cl.get("member_ids", []))
+            _cat   = _cl.get("category", "Unknown")
+            _cent  = _cl.get("centroid", {})
+            _clat  = _cent.get("lat", 0.0)
+            _clon  = _cent.get("lon", 0.0)
+
+            _severity = "🔥 CRITICAL" if _cci >= 7.5 else "⚠️ ELEVATED"
+            _badge_bg = "#DC2626" if _cci >= 7.5 else "#D97706"
+
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+                        border-left: 6px solid {_badge_bg};
+                        padding: 20px; border-radius: 8px; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span style="background-color: {_badge_bg}; color: white; padding: 4px 12px;
+                                     border-radius: 4px; font-weight: bold; font-size: 0.85em;">
+                            {_severity}
+                        </span>
+                        <span style="color: #94A3B8; font-size: 0.85em; margin-left: 10px;">
+                            {_cat}
+                        </span>
+                    </div>
+                    <span style="color: white; font-weight: bold; font-size: 1.4em;">
+                        CCI {_cci:.1f}/10
+                    </span>
+                </div>
+                <h3 style="color: #FFFFFF; margin: 12px 0 6px 0; font-size: 1.2em;">
+                    {_label}
+                </h3>
+                <p style="color: #CBD5E1; margin: 0; font-size: 0.9em;">
+                    Generated from <strong>{_count}</strong> independent citizen reports
+                    &nbsp;|&nbsp; Centroid: ({_clat:.4f}, {_clon:.4f})
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("---")
+
 # --- 6. 3D GEOSPATIAL MAP (CHENNAI CENTERING) ---
 st.subheader("🌍 GEOSPATIAL HEATMAP")
 
