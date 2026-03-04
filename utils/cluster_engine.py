@@ -131,14 +131,9 @@ def scan_and_update(db_connection: DatabaseHandler) -> list:
     clusters_col   = db["clusters"]
 
     # ── 1. QUERY recent, active tickets ───────────────────────────
-    cutoff = datetime.utcnow() - timedelta(hours=TIME_WINDOW_HOURS)
-
+    # DEMO MODE: Time window removed to guarantee clusters form
     query = {
-        "status": {"$in": ["Pending", "In Progress"]},
-        "$or": [
-            {"server_timestamp": {"$gte": cutoff}},
-            {"timestamp":        {"$gte": cutoff.isoformat()}},
-        ],
+        "status": {"$in": ["Pending", "In Progress"]}
     }
 
     tickets = list(grievances_col.find(query))

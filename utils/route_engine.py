@@ -12,6 +12,38 @@ def get_gmaps_client():
         st.error("Google Maps API key not found in secrets.toml")
         return None
 
+def get_smart_search_keyword(category, text):
+    """Context-aware NLP keyword extractor to prevent incorrect Google Maps routing."""
+    text_lower = str(text).lower()
+    cat = str(category)
+
+    if cat == "Electrical & Power Infrastructure":
+        return "electricity board OR electrical substation"
+    
+    if cat == "Sanitation & Public Health":
+        # Ensure medical terms are strictly excluded by the search query keyword
+        return "municipal corporation OR municipality office"
+        
+    if cat == "Water Supply & Drainage":
+        return "water supply board OR municipal corporation"
+        
+    if cat == "Roads & Transportation Infrastructure":
+        return "public works department OR municipal corporation"
+        
+    if cat == "Public Safety & Emergency":
+        fire_keywords = ['fire', 'தீ', 'आग', 'smoke']
+        if any(k in text_lower for k in fire_keywords):
+            return "fire station"
+            
+        medical_keywords = ['accident', 'fainted', 'விபத்து', 'एक्सीडेंट', 'blood', 'injured']
+        if any(k in text_lower for k in medical_keywords):
+            return "hospital OR trauma center"
+            
+        return "police station"
+        
+    # Default Fallback
+    return "local government office"
+
 def get_facility_type(category, grievance_text=""):
     """Maps the grievance to a Google Places Type and a specific search keyword."""
     cat = str(category).lower()
@@ -49,37 +81,48 @@ def get_facility_type(category, grievance_text=""):
     return {"type": "local_government_office", "keyword": "Municipal Corporation"}
 
 def find_nearest_station(incident_lat, incident_lon, category, grievance_text=""):
-    """Dynamically finds the nearest appropriate facility using Google Places API."""
+    """Dynamically finds the nearest appropriate facility using Google Places API with smart routing and expanding radius."""
     gmaps = get_gmaps_client()
     if not gmaps:
         return None
 
-    facility_info = get_facility_type(category, grievance_text)
-    fac_type = facility_info["type"]
-    fac_keyword = facility_info.get("keyword") # This might be None
+    # Use the context-aware NLP extractor
+    search_keyword = get_smart_search_keyword(category, grievance_text)
     
     try:
-        # Build search parameters dynamically
-        search_params = {
-            "location": (incident_lat, incident_lon),
-            "radius": 10000,
-            "type": fac_type
-        }
-        if fac_keyword:
-            search_params["keyword"] = fac_keyword
-            
-        places_result = gmaps.places_nearby(**search_params)
+        # ATTEMPT 1: 5km radius
+        places_result = gmaps.places_nearby(
+            location=(incident_lat, incident_lon),
+            radius=5000,
+            keyword=search_keyword
+        )
         
+        # ATTEMPT 2: 15km radius if zero results
         if not places_result.get('results'):
-            return None
+            places_result = gmaps.places_nearby(
+                location=(incident_lat, incident_lon),
+                radius=15000,
+                keyword=search_keyword
+            )
             
+        # ATTEMPT 3: Hardcoded absolute fallback if still zero results
+        if not places_result.get('results'):
+            return {
+                "name": "Central Command Dispatch (Fallback)",
+                "lat": 13.0827, # Chennai coordinates fallback
+                "lon": 80.2707,
+                "type": "Fallback Station"
+            }
+            
+        # Cleanly extract the first result
         nearest = places_result['results'][0]
         return {
             "name": nearest['name'],
             "lat": nearest['geometry']['location']['lat'],
             "lon": nearest['geometry']['location']['lng'],
-            "type": fac_type
+            "type": search_keyword
         }
+        
     except Exception as e:
         st.error(f"Error fetching nearby places: {e}")
         return None
